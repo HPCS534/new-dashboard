@@ -16,7 +16,7 @@ export async function fetchReplicates(): Promise<Replicate[]> {
 }
 
 export function imageUrl(replicateId: string): string {
-  return `${BASE_URL}/api/images/${replicateId}?api_key=${API_KEY}`;
+  return `${BASE_URL}/api/images/${encodeURIComponent(replicateId)}?api_key=${encodeURIComponent(API_KEY)}`;
 }
 
 export async function updateStatus(
