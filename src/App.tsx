@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchReplicates, imageUrl, updateStatus } from "./api";
 import type { GrainBox, Replicate } from "./types";
+import { PasswordGate } from "./PasswordGate";
 import "./App.css";
 
 type ReviewDecision = "accepted" | "denied";
@@ -217,7 +218,7 @@ function RecordDialog({ record, onClose }: { record: Replicate; onClose: () => v
   );
 }
 
-function App() {
+function Dashboard() {
   const [selectedRecord, setSelectedRecord] = useState<Replicate | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | Replicate["reviewStatus"]>("all");
@@ -337,6 +338,14 @@ function App() {
 
       {selectedRecord && <RecordDialog record={selectedRecord} onClose={() => setSelectedRecord(null)} />}
     </main>
+  );
+}
+
+function App() {
+  return (
+    <PasswordGate>
+      <Dashboard />
+    </PasswordGate>
   );
 }
 
