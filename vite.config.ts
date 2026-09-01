@@ -11,6 +11,14 @@ export default defineConfig(({ mode }) => {
         '/api': {
           target: env.VITE_BACKEND_URL,
           changeOrigin: true,
+          secure: true,
+          configure: (proxy) => {
+            proxy.on('proxyRes', (proxyRes) => {
+              proxyRes.headers['access-control-allow-origin'] = '*'
+              proxyRes.headers['access-control-allow-methods'] = 'GET,POST,PUT,PATCH,DELETE,OPTIONS'
+              proxyRes.headers['access-control-allow-headers'] = 'Content-Type, X-API-Key, Authorization'
+            })
+          },
         },
       },
     },

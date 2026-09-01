@@ -1,3 +1,5 @@
+export type ReviewStatus = "review" | "accepted" | "rejected" | "retraining";
+
 export interface GrainBox {
   x: number;
   y: number;
@@ -17,5 +19,5 @@ export interface Replicate {
   immatureWeight: number;
   percentage: number;
   grade: string;
-  reviewStatus: "unreviewed" | "accepted" | "denied";
+  reviewStatus: ReviewStatus;
 }

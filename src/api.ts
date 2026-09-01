@@ -1,18 +1,37 @@
-import type { Replicate } from "./types";
+import type { Replicate, ReviewStatus } from "./types";
 
 const BASE_URL = import.meta.env.DEV ? "" : import.meta.env.VITE_BACKEND_URL;
 const API_KEY = import.meta.env.VITE_API_KEY;
+
+type BackendReviewStatus = ReviewStatus | "unreviewed" | "denied";
+type BackendReplicate = Omit<Replicate, "reviewStatus"> & { reviewStatus: BackendReviewStatus };
+
+function normalizeStatus(status: BackendReviewStatus): ReviewStatus {
+  if (status === "unreviewed") return "review";
+  if (status === "denied") return "rejected";
+  return status;
+}
+
+function toBackendStatus(status: ReviewStatus): BackendReviewStatus {
+  if (status === "review") return "unreviewed";
+  if (status === "rejected") return "denied";
+  return status;
+}
+
+async function responseError(response: Response, fallback: string): Promise<Error> {
+  const detail = await response.text();
+  return new Error(detail || fallback);
+}
 
 export async function fetchReplicates(): Promise<Replicate[]> {
   const response = await fetch(`${BASE_URL}/api/replicates`, {
     headers: { "X-API-Key": API_KEY },
   });
 
-  if (!response.ok) {
-    throw new Error("Failed to fetch replicates");
-  }
+  if (!response.ok) throw await responseError(response, "Failed to fetch replicates");
 
-  return response.json() as Promise<Replicate[]>;
+  const records = await response.json() as BackendReplicate[];
+  return records.map((record) => ({ ...record, reviewStatus: normalizeStatus(record.reviewStatus) }));
 }
 
 export function imageUrl(replicateId: string): string {
@@ -21,7 +40,7 @@ export function imageUrl(replicateId: string): string {
 
 export async function updateStatus(
   replicateId: string,
-  status: "accepted" | "denied",
+  status: ReviewStatus,
 ): Promise<Pick<Replicate, "id" | "reviewStatus">> {
   const response = await fetch(`${BASE_URL}/api/replicates/${replicateId}/status`, {
     method: "PATCH",
@@ -29,12 +48,11 @@ export async function updateStatus(
       "X-API-Key": API_KEY,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ status }),
+    body: JSON.stringify({ status: toBackendStatus(status) }),
   });
 
-  if (!response.ok) {
-    throw new Error("Failed to update status");
-  }
+  if (!response.ok) throw await responseError(response, "Failed to update status");
 
-  return response.json() as Promise<Pick<Replicate, "id" | "reviewStatus">>;
+  const updated = await response.json() as { id: string; reviewStatus: BackendReviewStatus };
+  return { ...updated, reviewStatus: normalizeStatus(updated.reviewStatus) };
 }

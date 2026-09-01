@@ -20,9 +20,17 @@
   --danger-bg: #f7ebe8;
   --pending: #8a6a1f;
   --pending-bg: #f6f0df;
+  --retrain: #7a4fa0;
+  --retrain-bg: #f1eaf7;
+  --ai-box: #2f6f5e;
+  --user-box: #b5750d;
+  --radius: 8px;
+  --radius-sm: 6px;
   --font-mono: "SF Mono", "Roboto Mono", Menlo, Consolas, monospace;
+  --tab-bar-height: 58px;
+  --touch-target: 44px;
 }
 
 * { box-sizing: border-box; }
 body { min-width: 320px; margin: 0; background: var(--bg); }
-button, input { font: inherit; }
+button, input, select { font: inherit; }
