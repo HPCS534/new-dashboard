@@ -16,8 +16,13 @@ export async function fetchReplicates(): Promise<Replicate[]> {
     return (await response.json()) as Replicate[];
 }
 
-export function imageUrl(replicateId: string): string {
-    return `${BASE_URL}/api/images/${encodeURIComponent(replicateId)}?api_key=${encodeURIComponent(API_KEY)}`;
+export async function fetchImage(replicateId: string): Promise<string> {
+    const response = await fetch(`${BASE_URL}/api/images/${encodeURIComponent(replicateId)}`, {headers: {"X-API-Key": API_KEY,},},);
+    if (!response.ok) {
+        throw await responseError(response, "Failed to fetch image");
+    }
+    const blob = await response.blob();
+    return URL.createObjectURL(blob);
 }
 
 export async function updateStatus(replicateId: string, status: ReviewStatus,): Promise<Pick<Replicate, "id" | "reviewStatus">> {
