@@ -13,8 +13,6 @@ function normalizeStatus(status: BackendReviewStatus): ReviewStatus {
 }
 
 function toBackendStatus(status: ReviewStatus): BackendReviewStatus {
-  if (status === "review") return "unreviewed";
-  if (status === "rejected") return "denied";
   return status;
 }
 
@@ -35,7 +33,17 @@ export async function fetchReplicates(): Promise<Replicate[]> {
 }
 
 export function imageUrl(replicateId: string): string {
-  return `${BASE_URL}/api/images/${encodeURIComponent(replicateId)}?api_key=${encodeURIComponent(API_KEY)}`;
+  return `${BASE_URL}/api/images/${encodeURIComponent(replicateId)}`;
+}
+
+export async function fetchImage(replicateId: string): Promise<string> {
+  const response = await fetch(imageUrl(replicateId), {
+    headers: { "X-API-Key": API_KEY },
+  });
+
+  if (!response.ok) throw await responseError(response, "Failed to fetch image");
+
+  return URL.createObjectURL(await response.blob());
 }
 
 export async function updateStatus(

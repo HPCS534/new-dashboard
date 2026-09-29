@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDownAZ, ArrowUpAZ, Check, ChevronDown, Columns3, GripVertical, LayoutList, Search, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchReplicates, imageUrl, updateStatus } from "./api";
+import { fetchImage, fetchReplicates, updateStatus } from "./api";
 import { PasswordGate } from "./PasswordGate";
 import type { GrainBox, Replicate, ReviewStatus } from "./types";
 import "./App.css";
@@ -119,11 +119,29 @@ function ImageTiers({ record }: { record: Replicate }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     const source = new Image();
-    source.crossOrigin = "anonymous";
+    let objectUrl: string | null = null;
+    let cancelled = false;
     source.onload = () => { setImage(source); setFailed(false); };
     source.onerror = () => { setImage(null); setFailed(true); };
-    source.src = imageUrl(record.id);
-    return () => { source.onload = null; source.onerror = null; };
+    void fetchImage(record.id).then((url) => {
+      if (cancelled) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      objectUrl = url;
+      source.src = url;
+    }).catch(() => {
+      if (!cancelled) {
+        setImage(null);
+        setFailed(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+      source.onload = null;
+      source.onerror = null;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
   }, [record.id]);
 
   const frame = (grains: GrainBox[], color?: string) => {
