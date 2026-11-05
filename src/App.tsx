@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useRef, useState} from "react";
+import {useEffect, useLayoutEffect, useMemo, useRef, useState} from "react";
 import {
     ArrowDownAZ,
     ArrowUpAZ,
@@ -8,6 +8,8 @@ import {
     GripVertical,
     LayoutList,
     LogOut,
+    Minus,
+    Plus,
     Search,
     X
 } from "lucide-react";
@@ -105,12 +107,25 @@ function StatusPicker({picker, isUpdating, onSelect, onClose}: {
     </div>;
 }
 
-function GrainCanvas({image, grains, color}: { image: HTMLImageElement; grains: GrainBox[]; color?: string }) {
+const ZOOM_LEVELS = [1, 1.5, 2, 3, 4, 6];
+
+function GrainCanvas({image, grains, color, zoom}: {
+    image: HTMLImageElement;
+    grains: GrainBox[];
+    color?: string;
+    zoom: number
+}) {
     const width = image.naturalWidth || image.width || 1;
     const height = image.naturalHeight || image.height || 1;
 
     return <div className="grain-stage"
-                style={{position: "relative", width: "100%", aspectRatio: `${width} / ${height}`}}>
+                style={{
+                    position: "relative",
+                    width: `${zoom * 100}%`,
+                    aspectRatio: `${width} / ${height}`,
+                    justifySelf: "start",
+                    alignSelf: "start"
+                }}>
         <img src={image.src} alt=""
              style={{display: "block", width: "100%", height: "100%", objectFit: "contain", background: "#000"}}/>
         {grains.map((grain, index) => {
@@ -119,33 +134,74 @@ function GrainCanvas({image, grains, color}: { image: HTMLImageElement; grains: 
             const boxWidth = (grain.width / width) * 100;
             const boxHeight = (grain.height / height) * 100;
 
-            return <div key={`${grain.x}-${grain.y}-${index}`} style={{
-                position: "absolute",
-                left: `${left}%`,
-                top: `${top}%`,
-                width: `${boxWidth}%`,
-                height: `${boxHeight}%`,
-                border: `2px solid ${color ?? "#2f6f5e"}`,
-                boxSizing: "border-box",
-                borderRadius: 2,
-                background: "transparent",
-            }}>
-        <span style={{
-            position: "absolute",
-            left: 0,
-            top: 0,
-            transform: "translateY(-100%)",
-            background: color ?? "#2f6f5e",
-            color: "#fff",
-            fontSize: 10,
-            lineHeight: 1,
-            padding: "2px 4px",
-            borderRadius: "2px 2px 0 0",
-            whiteSpace: "nowrap",
-        }}>object</span>
-            </div>;
+            return <div key={`${grain.x}-${grain.y}-${index}`}
+                        title={grain.confidence != null ? `${Math.round(grain.confidence * 100)}% immature` : (grain.action ?? undefined)}
+                        style={{
+                            position: "absolute",
+                            left: `${left}%`,
+                            top: `${top}%`,
+                            width: `${boxWidth}%`,
+                            height: `${boxHeight}%`,
+                            border: `${zoom > 1 ? 2 : 1}px solid ${color ?? "#2f6f5e"}`,
+                            boxSizing: "border-box",
+                            borderRadius: 2,
+                            background: "transparent",
+                        }}/>;
         })}
     </div>;
+}
+
+function TierPanel({image, failed, grains, color, caption}: {
+    image: HTMLImageElement | null;
+    failed: boolean;
+    grains: GrainBox[];
+    color?: string;
+    caption: string
+}) {
+    const [zoomIndex, setZoomIndex] = useState(0);
+    const zoom = ZOOM_LEVELS[zoomIndex];
+    const frameRef = useRef<HTMLDivElement>(null);
+    const center = useRef<{ x: number; y: number } | null>(null);
+
+    const changeZoom = (next: number) => {
+        const frame = frameRef.current;
+        if (frame) {
+            center.current = {
+                x: (frame.scrollLeft + frame.clientWidth / 2) / frame.scrollWidth,
+                y: (frame.scrollTop + frame.clientHeight / 2) / frame.scrollHeight,
+            };
+        }
+        setZoomIndex(next);
+    };
+    useLayoutEffect(() => {
+        const frame = frameRef.current;
+        if (!frame || !center.current) return;
+        frame.scrollLeft = center.current.x * frame.scrollWidth - frame.clientWidth / 2;
+        frame.scrollTop = center.current.y * frame.scrollHeight - frame.clientHeight / 2;
+        center.current = null;
+    }, [zoomIndex]);
+
+    const width = image ? image.naturalWidth || image.width || 1 : 1;
+    const height = image ? image.naturalHeight || image.height || 1 : 1;
+
+    return <figure className="tier-cell">
+        <div className="tier-viewport">
+            <div className="tier-frame" ref={frameRef} style={image ? {aspectRatio: `${width} / ${height}`} : undefined}>
+                {failed ? <p className="image-message">Image unavailable</p>
+                    : !image ? <p className="image-message">Loading image...</p>
+                        : <GrainCanvas image={image} grains={grains} color={color} zoom={zoom}/>}
+            </div>
+            {image && <div className="zoom-controls" role="group" aria-label={`Zoom ${caption}`}>
+                <button className="zoom-button" type="button" aria-label="Zoom out" disabled={zoomIndex === 0}
+                        onClick={() => changeZoom(zoomIndex - 1)}><Minus size={16}/></button>
+                <span aria-live="polite">{Math.round(zoom * 100)}%</span>
+                <button className="zoom-button" type="button" aria-label="Zoom in"
+                        disabled={zoomIndex === ZOOM_LEVELS.length - 1}
+                        onClick={() => changeZoom(zoomIndex + 1)}><Plus size={16}/></button>
+            </div>}
+        </div>
+        <figcaption>{caption}</figcaption>
+    </figure>;
 }
 
 function ImageTiers({record}: { record: Replicate }) {
@@ -172,32 +228,17 @@ function ImageTiers({record}: { record: Replicate }) {
             source.onerror = null;
         };
     }, [record.imageSecureUrl]);
-    const frame = (grains: GrainBox[], color?: string) => {
-        if (failed) {
-            return <p className="image-message">Image unavailable</p>;
-        }
-        if (!image) {
-            return <p className="image-message">Loading image...</p>;
-        }
-        return (<GrainCanvas image={image} grains={grains} color={color}/>);
-    };
+    
     const correctedGrains = record.confirmedGrains.filter((grain) => grain.action !== "removed");
     return (<>
         <div className="overlay-legend" aria-label="Bounding-box legend"><span> <i className="legend-swatch ai"/> AI box </span>
             <span> <i className="legend-swatch reviewer"/> Reviewer correction </span></div>
         <div className="tier-grid">
-            <figure className="tier-cell">
-                <div className="tier-frame"> {frame([])} </div>
-                <figcaption>Raw input</figcaption>
-            </figure>
-            <figure className="tier-cell">
-                <div className="tier-frame"> {frame(record.aiPredictedGrains, "#2f6f5e")} </div>
-                <figcaption>AI prediction ({record.aiPredictedGrains.length})</figcaption>
-            </figure>
-            <figure className="tier-cell">
-                <div className="tier-frame"> {frame(correctedGrains, "#b5750d")} </div>
-                <figcaption>Reviewer correction ({correctedGrains.length})</figcaption>
-            </figure>
+            <TierPanel image={image} failed={failed} grains={[]} caption="Raw input"/>
+            <TierPanel image={image} failed={failed} grains={record.aiPredictedGrains} color="#2f6f5e"
+                       caption={`AI prediction (${record.aiPredictedGrains.length})`}/>
+            <TierPanel image={image} failed={failed} grains={correctedGrains} color="#b5750d"
+                       caption={`Reviewer correction (${correctedGrains.length})`}/>
         </div>
     </>);
 }
