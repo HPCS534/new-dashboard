@@ -181,6 +181,7 @@ function ImageTiers({record}: { record: Replicate }) {
         }
         return (<GrainCanvas image={image} grains={grains} color={color}/>);
     };
+    const correctedGrains = record.confirmedGrains.filter((grain) => grain.action !== "removed");
     return (<>
         <div className="overlay-legend" aria-label="Bounding-box legend"><span> <i className="legend-swatch ai"/> AI box </span>
             <span> <i className="legend-swatch reviewer"/> Reviewer correction </span></div>
@@ -191,11 +192,11 @@ function ImageTiers({record}: { record: Replicate }) {
             </figure>
             <figure className="tier-cell">
                 <div className="tier-frame"> {frame(record.aiPredictedGrains, "#2f6f5e")} </div>
-                <figcaption>AI prediction</figcaption>
+                <figcaption>AI prediction ({record.aiPredictedGrains.length})</figcaption>
             </figure>
             <figure className="tier-cell">
-                <div className="tier-frame"> {frame(record.confirmedGrains, "#b5750d")} </div>
-                <figcaption>Reviewer correction</figcaption>
+                <div className="tier-frame"> {frame(correctedGrains, "#b5750d")} </div>
+                <figcaption>Reviewer correction ({correctedGrains.length})</figcaption>
             </figure>
         </div>
     </>);
