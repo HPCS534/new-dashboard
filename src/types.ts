@@ -22,4 +22,12 @@ export interface Replicate {
   reviewStatus: ReviewStatus;
   imagePublicId: string;
   imageSecureUrl: string;
+  meetsRecommendedValue: boolean;
+  season: string | null;
+  indexNumber: string | null;
+  selectionName: string | null;
+  sampleNo: number | null;
+  capturedAt: string | null;
+  submittedAt: string | null;
+  processingSeconds: number | null;
 }

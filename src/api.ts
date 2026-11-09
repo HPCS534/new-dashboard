@@ -24,6 +24,31 @@ export async function fetchReplicates(): Promise<Replicate[]> {
     return (await response.json()) as Replicate[];
 }
 
+function fileNameFromDisposition(header: string | null): string | null {
+    if (!header) return null;
+    const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(header);
+    return match ? decodeURIComponent(match[1].trim()) : null;
+}
+
+export async function downloadReplicatesCsv(): Promise<void> {
+    const response = await fetch(`${BASE_URL}/api/replicates/export`, {headers: await authHeaders()});
+    if (!response.ok) {
+        throw await responseError(response, "Failed to export CSV");
+    }
+    const blob = await response.blob();
+    const fallbackName = `granular-records-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}.csv`;
+    const fileName = fileNameFromDisposition(response.headers.get("Content-Disposition")) ?? fallbackName;
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+}
+
 export async function updateStatus(replicateId: string, status: ReviewStatus,): Promise<Pick<Replicate, "id" | "reviewStatus">> {
     const response = await fetch(`${BASE_URL}/api/replicates/${encodeURIComponent(replicateId)}/status`, {
         method: "PATCH",

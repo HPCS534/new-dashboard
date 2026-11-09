@@ -5,6 +5,7 @@ import {
     Check,
     ChevronDown,
     Columns3,
+    Download,
     GripVertical,
     LayoutList,
     LogOut,
@@ -14,7 +15,7 @@ import {
     X
 } from "lucide-react";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
-import {fetchReplicates, updateStatus} from "./api";
+import {downloadReplicatesCsv, fetchReplicates, updateStatus} from "./api";
 import {AuthGate} from "./AuthGate";
 import {supabase} from "./supabase";
 import type {GrainBox, Replicate, ReviewStatus} from "./types";
@@ -45,6 +46,33 @@ function formatDate(value: string): string {
 
 function statusLabel(status: ReviewStatus): string {
     return STATUS_COLUMNS.find((column) => column.key === status)?.label ?? status;
+}
+
+const EM_DASH = "\u2014";
+
+function captureTime(record: Replicate): string {
+    return record.capturedAt ?? record.createdAt;
+}
+
+function formatOptionalDate(value: string | null): string {
+    return value ? formatDate(value) : EM_DASH;
+}
+
+function formatSampleNo(record: Replicate): string {
+    return record.sampleNo ? `${record.sampleNo} of 2` : EM_DASH;
+}
+
+function formatProcessing(record: Replicate): string {
+    if (!record.capturedAt || !record.submittedAt || record.processingSeconds == null) return EM_DASH;
+    const total = record.processingSeconds;
+    if (total < 60) return `${total.toFixed(1)} s`;
+    const minutes = Math.floor(total / 60);
+    return `${minutes} min ${(total - minutes * 60).toFixed(0)} s`;
+}
+
+function findSibling(record: Replicate, records: Replicate[]): Replicate | null {
+    if (!record.season || !record.indexNumber) return null;
+    return records.find((other) => other.id !== record.id && other.season === record.season && other.indexNumber === record.indexNumber) ?? null;
 }
 
 function StatusPill({record, onOpen}: { record: Replicate; onOpen: (anchor: HTMLElement, record: Replicate) => void }) {
@@ -186,7 +214,8 @@ function TierPanel({image, failed, grains, color, caption}: {
 
     return <figure className="tier-cell">
         <div className="tier-viewport">
-            <div className="tier-frame" ref={frameRef} style={image ? {aspectRatio: `${width} / ${height}`} : undefined}>
+            <div className="tier-frame" ref={frameRef}
+                 style={image ? {aspectRatio: `${width} / ${height}`} : undefined}>
                 {failed ? <p className="image-message">Image unavailable</p>
                     : !image ? <p className="image-message">Loading image...</p>
                         : <GrainCanvas image={image} grains={grains} color={color} zoom={zoom}/>}
@@ -228,7 +257,7 @@ function ImageTiers({record}: { record: Replicate }) {
             source.onerror = null;
         };
     }, [record.imageSecureUrl]);
-    
+
     const correctedGrains = record.confirmedGrains.filter((grain) => grain.action !== "removed");
     return (<>
         <div className="overlay-legend" aria-label="Bounding-box legend"><span> <i className="legend-swatch ai"/> AI box </span>
@@ -243,10 +272,12 @@ function ImageTiers({record}: { record: Replicate }) {
     </>);
 }
 
-function DetailOverlay({record, onClose, onOpenStatus}: {
+function DetailOverlay({record, sibling, onClose, onOpenStatus, onOpenSibling}: {
     record: Replicate;
+    sibling: Replicate | null;
     onClose: () => void;
-    onOpenStatus: (anchor: HTMLElement, record: Replicate) => void
+    onOpenStatus: (anchor: HTMLElement, record: Replicate) => void;
+    onOpenSibling: (record: Replicate) => void;
 }) {
     useEffect(() => {
         const closeOnEscape = (event: KeyboardEvent) => {
@@ -270,11 +301,39 @@ function DetailOverlay({record, onClose, onOpenStatus}: {
                         <dd>{record.sampleId}</dd>
                     </div>
                     <div>
+                        <dt>Sample</dt>
+                        <dd>{formatSampleNo(record)}</dd>
+                    </div>
+                    <div>
                         <dt>Technician</dt>
                         <dd>{record.technicianName}</dd>
                     </div>
                     <div>
+                        <dt>Season</dt>
+                        <dd>{record.season ?? EM_DASH}</dd>
+                    </div>
+                    <div>
+                        <dt>Index no.</dt>
+                        <dd>{record.indexNumber ?? EM_DASH}</dd>
+                    </div>
+                    <div>
+                        <dt>Selection name</dt>
+                        <dd>{record.selectionName ?? EM_DASH}</dd>
+                    </div>
+                    <div>
                         <dt>Captured</dt>
+                        <dd>{formatOptionalDate(record.capturedAt)}</dd>
+                    </div>
+                    <div>
+                        <dt>Submitted</dt>
+                        <dd>{formatOptionalDate(record.submittedAt)}</dd>
+                    </div>
+                    <div>
+                        <dt>Processing time</dt>
+                        <dd>{formatProcessing(record)}</dd>
+                    </div>
+                    <div>
+                        <dt>Saved</dt>
                         <dd>{formatDate(record.createdAt)}</dd>
                     </div>
                     <div>
@@ -283,13 +342,20 @@ function DetailOverlay({record, onClose, onOpenStatus}: {
                     </div>
                     <div>
                         <dt>Immature weight</dt>
-                        <dd>{record.immatureWeight}</dd>
+                        <dd>{record.immatureWeight} g</dd>
                     </div>
                     <div>
                         <dt>Percentage</dt>
-                        <dd>{record.percentage}%</dd>
+                        <dd>{record.percentage.toFixed(1)}%</dd>
+                    </div>
+                    <div>
+                        <dt>Recommended value</dt>
+                        <dd>{record.meetsRecommendedValue ? "Meets (below 2.0%)" : "Does not meet"}</dd>
                     </div>
                 </dl>
+                {sibling && <button className="sibling-link" type="button" onClick={() => onOpenSibling(sibling)}>
+                    View other sample of this entry ({formatSampleNo(sibling)}: {sibling.sampleId})
+                </button>}
             </div>
             <footer className="detail-footer"><span>Status</span><StatusPill record={record} onOpen={onOpenStatus}/>
             </footer>
@@ -310,7 +376,9 @@ function RecordCard({record, onOpen, onOpenStatus}: {
     }}>
         <div className="record-card-top"><strong>{record.sampleId}</strong><StatusPill record={record}
                                                                                        onOpen={onOpenStatus}/></div>
-        <p>{record.technicianName}</p><span>{formatDate(record.createdAt)}</span>
+        <p>{record.technicianName}</p>
+        {record.indexNumber && <p>{record.season} · Index {record.indexNumber} · Sample {formatSampleNo(record)}</p>}
+        <span>{formatDate(captureTime(record))}</span>
     </article>;
 }
 
@@ -338,7 +406,9 @@ function KanbanCard({record, onOpen, onOpenStatus, onDragStart, onDragEnd}: {
     }}>
         <div className="kanban-card-title"><GripVertical size={15}
                                                          aria-hidden="true"/><strong>{record.sampleId}</strong></div>
-        <p>{record.technicianName}</p><span>{formatDate(record.createdAt)}</span>
+        <p>{record.technicianName}</p>
+        {record.indexNumber && <p>{record.season} · Index {record.indexNumber} · Sample {formatSampleNo(record)}</p>}
+        <span>{formatDate(captureTime(record))}</span>
         <button className="kanban-card-move" type="button" onClick={(event) => {
             event.stopPropagation();
             onOpenStatus(event.currentTarget, record);
@@ -382,17 +452,20 @@ function Dashboard() {
         onSettled: () => void queryClient.invalidateQueries({queryKey: ["replicates"]}),
     });
 
+    const exportMutation = useMutation({mutationFn: downloadReplicatesCsv});
+
     const visibleRecords = useMemo(() => {
         const term = searchTerm.trim().toLowerCase();
-        const filtered = records.filter((record) => (filter === "all" || record.reviewStatus === filter) && (!term || [record.id, record.sampleId, record.technicianName].some((field) => field.toLowerCase().includes(term))));
+        const filtered = records.filter((record) => (filter === "all" || record.reviewStatus === filter) && (!term || [record.id, record.sampleId, record.technicianName, record.indexNumber, record.season, record.selectionName].some((field) => (field ?? "").toLowerCase().includes(term))));
         const [key, direction] = sort.split("-") as ["name" | "date", "asc" | "desc"];
         return filtered.toSorted((left, right) => {
-            const comparison = key === "name" ? left.sampleId.localeCompare(right.sampleId) : left.createdAt.localeCompare(right.createdAt);
+            const comparison = key === "name" ? left.sampleId.localeCompare(right.sampleId) : captureTime(left).localeCompare(captureTime(right));
             return direction === "asc" ? comparison : -comparison;
         });
     }, [filter, records, searchTerm, sort]);
 
     const selectedRecord = records.find((record) => record.id === selectedId) ?? null;
+    const selectedSibling = selectedRecord ? findSibling(selectedRecord, records) : null;
     const counts = useMemo(() => Object.fromEntries(STATUS_COLUMNS.map(({key}) => [key, records.filter((record) => record.reviewStatus === key).length])) as Record<ReviewStatus, number>, [records]);
     const openStatusPicker = (anchor: HTMLElement, record: Replicate) => setPicker({anchor, record});
     const changeStatus = (record: Replicate, status: ReviewStatus) => {
@@ -438,7 +511,8 @@ function Dashboard() {
                 </div>
                 <div className="toolbar-secondary"><label className="search-field" htmlFor="record-search"><Search
                     size={17} aria-hidden="true"/><span className="visually-hidden">Search records</span><input
-                    id="record-search" type="search" placeholder="Search records" value={searchTerm}
+                    id="record-search" type="search" placeholder="Search sample, index no., season, selection"
+                    value={searchTerm}
                     onChange={(event) => setSearchTerm(event.target.value)}/></label><label className="sort-field"><span
                     className="visually-hidden">Sort records</span><select value={sort}
                                                                            onChange={(event) => setSort(event.target.value as SortOption)}>
@@ -446,7 +520,14 @@ function Dashboard() {
                     <option value="name-desc">Name Z-A</option>
                     <option value="date-desc">Newest</option>
                     <option value="date-asc">Oldest</option>
-                </select></label></div>
+                </select></label>
+                    <button className="export-button" type="button"
+                            disabled={records.length === 0 || exportMutation.isPending}
+                            onClick={() => exportMutation.mutate()}>
+                        <Download size={16}
+                                  aria-hidden="true"/>{exportMutation.isPending ? "Exporting..." : "Export CSV"}
+                    </button>
+                </div>
                 <section className="record-list-container" aria-label="Record list">
                     {isLoading && <p className="view-message">Loading records...</p>}{isError &&
                     <p className="view-message error-message" role="alert">Could not load
@@ -467,10 +548,13 @@ function Dashboard() {
                                                 onClick={() => toggleSort("name")}>Sample {sort.startsWith("name") && (sort.endsWith("asc") ?
                                             <ArrowDownAZ size={14}/> : <ArrowUpAZ size={14}/>)}</button>
                                     </th>
+                                    <th>Index no.</th>
+                                    <th>Season</th>
+                                    <th>Samples</th>
                                     <th>Technician</th>
                                     <th>
                                         <button type="button"
-                                                onClick={() => toggleSort("date")}>Created {sort.startsWith("date") && (sort.endsWith("asc") ?
+                                                onClick={() => toggleSort("date")}>Captured {sort.startsWith("date") && (sort.endsWith("asc") ?
                                             <ArrowDownAZ size={14}/> : <ArrowUpAZ size={14}/>)}</button>
                                     </th>
                                     <th>Grade</th>
@@ -483,12 +567,15 @@ function Dashboard() {
                                                                                if (event.key === "Enter") openRecord(record);
                                                                            }}>
                                     <td className="mono-cell">{record.sampleId}</td>
+                                    <td className="mono-cell">{record.indexNumber ?? EM_DASH}</td>
+                                    <td className="mono-cell">{record.season ?? EM_DASH}</td>
+                                    <td>{formatSampleNo(record)}</td>
                                     <td>{record.technicianName}</td>
-                                    <td>{formatDate(record.createdAt)}</td>
+                                    <td>{formatDate(captureTime(record))}</td>
                                     <td>{record.grade}</td>
                                     <td><StatusPill record={record} onOpen={openStatusPicker}/></td>
                                 </tr>)}{visibleRecords.length === 0 && <tr>
-                                    <td className="view-message" colSpan={5}>No records match the current filters.</td>
+                                    <td className="view-message" colSpan={9}>No records match the current filters.</td>
                                 </tr>}</tbody>
                             </table>
                         </div>
@@ -551,10 +638,15 @@ function Dashboard() {
             <button className={view === "kanban" ? "current" : ""} type="button" onClick={() => setView("kanban")}>
                 <Columns3 size={20}/><span>Kanban</span></button>
         </nav>
-        {selectedRecord && <DetailOverlay record={selectedRecord} onClose={() => setSelectedId(null)}
-                                          onOpenStatus={openStatusPicker}/>}
+        {selectedRecord && <DetailOverlay record={selectedRecord} sibling={selectedSibling}
+                                          onClose={() => setSelectedId(null)}
+                                          onOpenStatus={openStatusPicker}
+                                          onOpenSibling={openRecord}/>}
         <StatusPicker picker={picker} isUpdating={updateMutation.isPending} onSelect={changeStatus}
                       onClose={() => setPicker(null)}/>
+        {exportMutation.isError && <p className="mutation-toast"
+                                      role="alert">Could not export
+            CSV: {exportMutation.error instanceof Error ? exportMutation.error.message : "Unknown error"}</p>}
         {updateMutation.isError && <p className="mutation-toast"
                                       role="alert">{updateMutation.error instanceof Error ? updateMutation.error.message : "Could not update review status."}</p>}
     </main>;
