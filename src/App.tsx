@@ -1,39 +1,17 @@
 import {useEffect, useLayoutEffect, useMemo, useRef, useState} from "react";
-import {
-    ArrowDownAZ,
-    ArrowUpAZ,
-    Check,
-    ChevronDown,
-    Columns3,
-    GripVertical,
-    LayoutList,
-    LogOut,
-    Minus,
-    Plus,
-    Search,
-    X
-} from "lucide-react";
+import {ArrowDownAZ, ArrowUpAZ, Columns3, Download, GripVertical, LayoutList, LogOut, Minus, Plus, Search, X} from "lucide-react";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {fetchReplicates, updateStatus} from "./api";
 import {AuthGate} from "./AuthGate";
 import {supabase} from "./supabase";
 import type {GrainBox, Replicate, ReviewStatus} from "./types";
+import {exportCsv} from "./export";
+import {StatusPicker, StatusPill, type StatusPickerState} from "./components/StatusPicker";
+import {STATUS_COLUMNS, statusLabel} from "./components/status";
 import "./App.css";
-
-const STATUS_COLUMNS: Array<{ key: ReviewStatus; label: string }> = [
-    {key: "review", label: "Review"},
-    {key: "accepted", label: "Accepted"},
-    {key: "rejected", label: "Rejected"},
-    {key: "retraining", label: "Retraining"},
-];
 
 type View = "row" | "kanban";
 type SortOption = "name-asc" | "name-desc" | "date-desc" | "date-asc";
-
-interface StatusPickerState {
-    record: Replicate;
-    anchor: HTMLElement;
-}
 
 function formatDate(value: string): string {
     const date = new Date(value);
@@ -43,68 +21,16 @@ function formatDate(value: string): string {
     }).format(date);
 }
 
-function statusLabel(status: ReviewStatus): string {
-    return STATUS_COLUMNS.find((column) => column.key === status)?.label ?? status;
+function formatOptionalDate(value?: string | null): string {
+    return value ? formatDate(value) : "—";
 }
 
-function StatusPill({record, onOpen}: { record: Replicate; onOpen: (anchor: HTMLElement, record: Replicate) => void }) {
-    return <button className={`status-pill ${record.reviewStatus}`} type="button" onClick={(event) => {
-        event.stopPropagation();
-        onOpen(event.currentTarget, record);
-    }}>
-        {statusLabel(record.reviewStatus)} <ChevronDown size={14} aria-hidden="true"/>
-    </button>;
-}
-
-function StatusPicker({picker, isUpdating, onSelect, onClose}: {
-    picker: StatusPickerState | null;
-    isUpdating: boolean;
-    onSelect: (record: Replicate, status: ReviewStatus) => void;
-    onClose: () => void;
-}) {
-    const [position, setPosition] = useState({left: 16, top: 16});
-
-    useEffect(() => {
-        if (!picker || !window.matchMedia("(min-width: 900px)").matches) return;
-        const rect = picker.anchor.getBoundingClientRect();
-        setPosition({
-            left: Math.min(Math.max(16, rect.left), window.innerWidth - 216),
-            top: Math.min(rect.bottom + 8, window.innerHeight - 248)
-        });
-    }, [picker]);
-
-    useEffect(() => {
-        if (!picker) return;
-        const closeOnEscape = (event: KeyboardEvent) => {
-            if (event.key === "Escape") onClose();
-        };
-        window.addEventListener("keydown", closeOnEscape);
-        return () => window.removeEventListener("keydown", closeOnEscape);
-    }, [onClose, picker]);
-
-    if (!picker) return null;
-    const isDesktop = window.matchMedia("(min-width: 900px)").matches;
-    return <div className="sheet-scrim" role="presentation" onMouseDown={onClose}>
-        <section className="status-sheet open" aria-label={`Change status for ${picker.record.sampleId}`}
-                 onMouseDown={(event) => event.stopPropagation()}
-                 style={isDesktop ? {left: position.left, top: position.top} : undefined}>
-            <div className="sheet-grabber" aria-hidden="true"/>
-            <p className="sheet-title">Move record to</p>
-            <div className="status-sheet-options">
-                {STATUS_COLUMNS.map((column) => {
-                    const isCurrent = column.key === picker.record.reviewStatus;
-                    return <button key={column.key}
-                                   className={`status-option ${column.key} ${isCurrent ? "current" : ""}`} type="button"
-                                   disabled={isCurrent || isUpdating} onClick={() => {
-                        const record = picker.record;
-                        onClose();
-                        onSelect(record, column.key);
-                    }}><span className="status-dot"/><span>{column.label}</span>{isCurrent &&
-                        <Check size={16} aria-label="Current status"/>}</button>;
-                })}
-            </div>
-        </section>
-    </div>;
+function processingTime(record: Replicate): string {
+    if (!record.capturedAt || !record.submittedAt) return "—";
+    const milliseconds = new Date(record.submittedAt).getTime() - new Date(record.capturedAt).getTime();
+    if (!Number.isFinite(milliseconds) || milliseconds < 0) return "—";
+    const seconds = Math.round(milliseconds / 1000);
+    return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
 const ZOOM_LEVELS = [1, 1.5, 2, 3, 4, 6];
@@ -243,10 +169,12 @@ function ImageTiers({record}: { record: Replicate }) {
     </>);
 }
 
-function DetailOverlay({record, onClose, onOpenStatus}: {
+function DetailOverlay({record, onClose, onOpenStatus, otherSample, onOpenRecord}: {
     record: Replicate;
     onClose: () => void;
-    onOpenStatus: (anchor: HTMLElement, record: Replicate) => void
+    onOpenStatus: (anchor: HTMLElement, record: Replicate) => void;
+    otherSample?: Replicate;
+    onOpenRecord: (record: Replicate) => void;
 }) {
     useEffect(() => {
         const closeOnEscape = (event: KeyboardEvent) => {
@@ -274,8 +202,36 @@ function DetailOverlay({record, onClose, onOpenStatus}: {
                         <dd>{record.technicianName}</dd>
                     </div>
                     <div>
+                        <dt>Season</dt>
+                        <dd>{record.season || "—"}</dd>
+                    </div>
+                    <div>
+                        <dt>Index number</dt>
+                        <dd>{record.indexNumber || "—"}</dd>
+                    </div>
+                    <div>
+                        <dt>Selection</dt>
+                        <dd>{record.selectionName || "—"}</dd>
+                    </div>
+                    <div>
+                        <dt>Sample</dt>
+                        <dd>{record.sampleNo ? `${record.sampleNo} of 2` : "—"}</dd>
+                    </div>
+                    <div>
                         <dt>Captured</dt>
+                        <dd>{formatOptionalDate(record.capturedAt)}</dd>
+                    </div>
+                    <div>
+                        <dt>Submitted</dt>
+                        <dd>{formatOptionalDate(record.submittedAt)}</dd>
+                    </div>
+                    <div>
+                        <dt>Saved</dt>
                         <dd>{formatDate(record.createdAt)}</dd>
+                    </div>
+                    <div>
+                        <dt>Processing time</dt>
+                        <dd>{processingTime(record)}</dd>
                     </div>
                     <div>
                         <dt>Grade</dt>
@@ -289,7 +245,14 @@ function DetailOverlay({record, onClose, onOpenStatus}: {
                         <dt>Percentage</dt>
                         <dd>{record.percentage}%</dd>
                     </div>
+                    <div>
+                        <dt>Recommended value</dt>
+                        <dd>{record.meetsRecommendedValue == null ? "—" : record.meetsRecommendedValue ? "Yes" : "No"}</dd>
+                    </div>
                 </dl>
+                {otherSample && <button className="related-record-link" type="button" onClick={() => onOpenRecord(otherSample)}>
+                    Open sample {otherSample.sampleNo ?? "—"} of this entry
+                </button>}
             </div>
             <footer className="detail-footer"><span>Status</span><StatusPill record={record} onOpen={onOpenStatus}/>
             </footer>
@@ -310,7 +273,7 @@ function RecordCard({record, onOpen, onOpenStatus}: {
     }}>
         <div className="record-card-top"><strong>{record.sampleId}</strong><StatusPill record={record}
                                                                                        onOpen={onOpenStatus}/></div>
-        <p>{record.technicianName}</p><span>{formatDate(record.createdAt)}</span>
+        <p>{record.technicianName}</p><span>{record.season || "—"} · {record.indexNumber || "—"} · {formatDate(record.createdAt)}</span>
     </article>;
 }
 
@@ -384,13 +347,27 @@ function Dashboard() {
 
     const visibleRecords = useMemo(() => {
         const term = searchTerm.trim().toLowerCase();
-        const filtered = records.filter((record) => (filter === "all" || record.reviewStatus === filter) && (!term || [record.id, record.sampleId, record.technicianName].some((field) => field.toLowerCase().includes(term))));
+        const filtered = records.filter((record) => (filter === "all" || record.reviewStatus === filter) && (!term || [record.id, record.sampleId, record.technicianName, record.indexNumber, record.season, record.selectionName].some((field) => field?.toLowerCase().includes(term))));
         const [key, direction] = sort.split("-") as ["name" | "date", "asc" | "desc"];
         return filtered.toSorted((left, right) => {
             const comparison = key === "name" ? left.sampleId.localeCompare(right.sampleId) : left.createdAt.localeCompare(right.createdAt);
             return direction === "asc" ? comparison : -comparison;
         });
     }, [filter, records, searchTerm, sort]);
+
+    const sampleGroups = useMemo(() => {
+        const groups = new Map<string, Replicate[]>();
+        records.forEach((record) => {
+            const key = `${record.season ?? ""}:${record.indexNumber ?? ""}`;
+            groups.set(key, [...(groups.get(key) ?? []), record].sort((left, right) => (left.sampleNo ?? 0) - (right.sampleNo ?? 0)));
+        });
+        return groups;
+    }, [records]);
+
+    const samplePosition = (record: Replicate): string => {
+        const group = sampleGroups.get(`${record.season ?? ""}:${record.indexNumber ?? ""}`);
+        return group && group.length > 1 ? `${group.findIndex((candidate) => candidate.id === record.id) + 1} of ${group.length}` : "1 of 1";
+    };
 
     const selectedRecord = records.find((record) => record.id === selectedId) ?? null;
     const counts = useMemo(() => Object.fromEntries(STATUS_COLUMNS.map(({key}) => [key, records.filter((record) => record.reviewStatus === key).length])) as Record<ReviewStatus, number>, [records]);
@@ -446,7 +423,8 @@ function Dashboard() {
                     <option value="name-desc">Name Z-A</option>
                     <option value="date-desc">Newest</option>
                     <option value="date-asc">Oldest</option>
-                </select></label></div>
+                </select></label><button className="export-button" type="button" disabled={visibleRecords.length === 0}
+                                          onClick={() => exportCsv(visibleRecords)}><Download size={16}/>Export CSV</button></div>
                 <section className="record-list-container" aria-label="Record list">
                     {isLoading && <p className="view-message">Loading records...</p>}{isError &&
                     <p className="view-message error-message" role="alert">Could not load
@@ -468,6 +446,9 @@ function Dashboard() {
                                             <ArrowDownAZ size={14}/> : <ArrowUpAZ size={14}/>)}</button>
                                     </th>
                                     <th>Technician</th>
+                                    <th>Index No.</th>
+                                    <th>Season</th>
+                                    <th>Samples</th>
                                     <th>
                                         <button type="button"
                                                 onClick={() => toggleSort("date")}>Created {sort.startsWith("date") && (sort.endsWith("asc") ?
@@ -484,11 +465,14 @@ function Dashboard() {
                                                                            }}>
                                     <td className="mono-cell">{record.sampleId}</td>
                                     <td>{record.technicianName}</td>
+                                    <td>{record.indexNumber || "—"}</td>
+                                    <td>{record.season || "—"}</td>
+                                    <td>{samplePosition(record)}</td>
                                     <td>{formatDate(record.createdAt)}</td>
                                     <td>{record.grade}</td>
                                     <td><StatusPill record={record} onOpen={openStatusPicker}/></td>
                                 </tr>)}{visibleRecords.length === 0 && <tr>
-                                    <td className="view-message" colSpan={5}>No records match the current filters.</td>
+                                    <td className="view-message" colSpan={8}>No records match the current filters.</td>
                                 </tr>}</tbody>
                             </table>
                         </div>
@@ -552,7 +536,9 @@ function Dashboard() {
                 <Columns3 size={20}/><span>Kanban</span></button>
         </nav>
         {selectedRecord && <DetailOverlay record={selectedRecord} onClose={() => setSelectedId(null)}
-                                          onOpenStatus={openStatusPicker}/>}
+                                          onOpenStatus={openStatusPicker}
+                                          otherSample={sampleGroups.get(`${selectedRecord.season ?? ""}:${selectedRecord.indexNumber ?? ""}`)?.find((record) => record.id !== selectedRecord.id)}
+                                          onOpenRecord={openRecord}/>}
         <StatusPicker picker={picker} isUpdating={updateMutation.isPending} onSelect={changeStatus}
                       onClose={() => setPicker(null)}/>
         {updateMutation.isError && <p className="mutation-toast"
