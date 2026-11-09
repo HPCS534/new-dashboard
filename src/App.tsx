@@ -48,11 +48,16 @@ function formatSampleNo(record: Replicate): string {
 }
 
 function formatProcessing(record: Replicate): string {
-    if (!record.capturedAt || !record.submittedAt || record.processingSeconds == null) return EM_DASH;
-    const total = record.processingSeconds;
+    if (!record.capturedAt || !record.submittedAt) return EM_DASH;
+    const total = (new Date(record.submittedAt).getTime() - new Date(record.capturedAt).getTime()) / 1000;
+    if (!Number.isFinite(total) || total < 0) return EM_DASH;
     if (total < 60) return `${total.toFixed(1)} s`;
     const minutes = Math.floor(total / 60);
     return `${minutes} min ${(total - minutes * 60).toFixed(0)} s`;
+}
+
+function formatGrade(grade: string): string {
+    return grade === "Below Standard" ? "Not classified" : grade;
 }
 
 function findSibling(record: Replicate, records: Replicate[]): Replicate | null {
@@ -263,7 +268,7 @@ function DetailOverlay({record, sibling, onClose, onOpenStatus, onOpenSibling}: 
                     </div>
                     <div>
                         <dt>Grade</dt>
-                        <dd>{record.grade}</dd>
+                        <dd>{formatGrade(record.grade)}</dd>
                     </div>
                     <div>
                         <dt>Immature weight</dt>
@@ -275,7 +280,7 @@ function DetailOverlay({record, sibling, onClose, onOpenStatus, onOpenSibling}: 
                     </div>
                     <div>
                         <dt>Recommended value</dt>
-                        <dd>{record.meetsRecommendedValue ? "Meets (below 2.0%)" : "Does not meet"}</dd>
+                        <dd>{record.meetsRecommendedValue == null ? EM_DASH : record.meetsRecommendedValue ? "Meets (below 2.0%)" : "Does not meet"}</dd>
                     </div>
                 </dl>
                 {sibling && <button className="sibling-link" type="button" onClick={() => onOpenSibling(sibling)}>
@@ -494,7 +499,7 @@ function Dashboard() {
                                     <td>{formatSampleNo(record)}</td>
                                     <td>{record.technicianName}</td>
                                     <td>{formatDate(captureTime(record))}</td>
-                                    <td>{record.grade}</td>
+                                    <td>{formatGrade(record.grade)}</td>
                                     <td><StatusPill record={record} onOpen={openStatusPicker}/></td>
                                 </tr>)}{visibleRecords.length === 0 && <tr>
                                     <td className="view-message" colSpan={9}>No records match the current filters.</td>
