@@ -20,4 +20,6 @@ export interface Replicate {
   percentage: number;
   grade: string;
   reviewStatus: ReviewStatus;
+  imagePublicId: string;
+  imageSecureUrl: string;
 }

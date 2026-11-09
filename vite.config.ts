@@ -16,7 +16,7 @@ export default defineConfig(({ mode }) => {
             proxy.on('proxyRes', (proxyRes) => {
               proxyRes.headers['access-control-allow-origin'] = '*'
               proxyRes.headers['access-control-allow-methods'] = 'GET,POST,PUT,PATCH,DELETE,OPTIONS'
-              proxyRes.headers['access-control-allow-headers'] = 'Content-Type, X-API-Key, Authorization'
+              proxyRes.headers['access-control-allow-headers'] = 'Content-Type, Authorization'
             })
           },
         },
