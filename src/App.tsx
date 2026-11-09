@@ -2,8 +2,6 @@ import {useEffect, useLayoutEffect, useMemo, useRef, useState} from "react";
 import {
     ArrowDownAZ,
     ArrowUpAZ,
-    Check,
-    ChevronDown,
     Columns3,
     Download,
     GripVertical,
@@ -15,26 +13,17 @@ import {
     X
 } from "lucide-react";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
-import {downloadReplicatesCsv, fetchReplicates, updateStatus} from "./api";
+import {fetchReplicates, updateStatus} from "./api";
 import {AuthGate} from "./AuthGate";
 import {supabase} from "./supabase";
 import type {GrainBox, Replicate, ReviewStatus} from "./types";
+import {StatusPicker, StatusPill, type StatusPickerState} from "./components/StatusPicker";
+import {STATUS_COLUMNS, statusLabel} from "./components/status";
+import {exportCsv} from "./export";
 import "./App.css";
-
-const STATUS_COLUMNS: Array<{ key: ReviewStatus; label: string }> = [
-    {key: "review", label: "Review"},
-    {key: "accepted", label: "Accepted"},
-    {key: "rejected", label: "Rejected"},
-    {key: "retraining", label: "Retraining"},
-];
 
 type View = "row" | "kanban";
 type SortOption = "name-asc" | "name-desc" | "date-desc" | "date-asc";
-
-interface StatusPickerState {
-    record: Replicate;
-    anchor: HTMLElement;
-}
 
 function formatDate(value: string): string {
     const date = new Date(value);
@@ -42,10 +31,6 @@ function formatDate(value: string): string {
         dateStyle: "medium",
         timeStyle: "short"
     }).format(date);
-}
-
-function statusLabel(status: ReviewStatus): string {
-    return STATUS_COLUMNS.find((column) => column.key === status)?.label ?? status;
 }
 
 const EM_DASH = "\u2014";
@@ -73,66 +58,6 @@ function formatProcessing(record: Replicate): string {
 function findSibling(record: Replicate, records: Replicate[]): Replicate | null {
     if (!record.season || !record.indexNumber) return null;
     return records.find((other) => other.id !== record.id && other.season === record.season && other.indexNumber === record.indexNumber) ?? null;
-}
-
-function StatusPill({record, onOpen}: { record: Replicate; onOpen: (anchor: HTMLElement, record: Replicate) => void }) {
-    return <button className={`status-pill ${record.reviewStatus}`} type="button" onClick={(event) => {
-        event.stopPropagation();
-        onOpen(event.currentTarget, record);
-    }}>
-        {statusLabel(record.reviewStatus)} <ChevronDown size={14} aria-hidden="true"/>
-    </button>;
-}
-
-function StatusPicker({picker, isUpdating, onSelect, onClose}: {
-    picker: StatusPickerState | null;
-    isUpdating: boolean;
-    onSelect: (record: Replicate, status: ReviewStatus) => void;
-    onClose: () => void;
-}) {
-    const [position, setPosition] = useState({left: 16, top: 16});
-
-    useEffect(() => {
-        if (!picker || !window.matchMedia("(min-width: 900px)").matches) return;
-        const rect = picker.anchor.getBoundingClientRect();
-        setPosition({
-            left: Math.min(Math.max(16, rect.left), window.innerWidth - 216),
-            top: Math.min(rect.bottom + 8, window.innerHeight - 248)
-        });
-    }, [picker]);
-
-    useEffect(() => {
-        if (!picker) return;
-        const closeOnEscape = (event: KeyboardEvent) => {
-            if (event.key === "Escape") onClose();
-        };
-        window.addEventListener("keydown", closeOnEscape);
-        return () => window.removeEventListener("keydown", closeOnEscape);
-    }, [onClose, picker]);
-
-    if (!picker) return null;
-    const isDesktop = window.matchMedia("(min-width: 900px)").matches;
-    return <div className="sheet-scrim" role="presentation" onMouseDown={onClose}>
-        <section className="status-sheet open" aria-label={`Change status for ${picker.record.sampleId}`}
-                 onMouseDown={(event) => event.stopPropagation()}
-                 style={isDesktop ? {left: position.left, top: position.top} : undefined}>
-            <div className="sheet-grabber" aria-hidden="true"/>
-            <p className="sheet-title">Move record to</p>
-            <div className="status-sheet-options">
-                {STATUS_COLUMNS.map((column) => {
-                    const isCurrent = column.key === picker.record.reviewStatus;
-                    return <button key={column.key}
-                                   className={`status-option ${column.key} ${isCurrent ? "current" : ""}`} type="button"
-                                   disabled={isCurrent || isUpdating} onClick={() => {
-                        const record = picker.record;
-                        onClose();
-                        onSelect(record, column.key);
-                    }}><span className="status-dot"/><span>{column.label}</span>{isCurrent &&
-                        <Check size={16} aria-label="Current status"/>}</button>;
-                })}
-            </div>
-        </section>
-    </div>;
 }
 
 const ZOOM_LEVELS = [1, 1.5, 2, 3, 4, 6];
@@ -452,8 +377,6 @@ function Dashboard() {
         onSettled: () => void queryClient.invalidateQueries({queryKey: ["replicates"]}),
     });
 
-    const exportMutation = useMutation({mutationFn: downloadReplicatesCsv});
-
     const visibleRecords = useMemo(() => {
         const term = searchTerm.trim().toLowerCase();
         const filtered = records.filter((record) => (filter === "all" || record.reviewStatus === filter) && (!term || [record.id, record.sampleId, record.technicianName, record.indexNumber, record.season, record.selectionName].some((field) => (field ?? "").toLowerCase().includes(term))));
@@ -522,10 +445,9 @@ function Dashboard() {
                     <option value="date-asc">Oldest</option>
                 </select></label>
                     <button className="export-button" type="button"
-                            disabled={records.length === 0 || exportMutation.isPending}
-                            onClick={() => exportMutation.mutate()}>
-                        <Download size={16}
-                                  aria-hidden="true"/>{exportMutation.isPending ? "Exporting..." : "Export CSV"}
+                            disabled={visibleRecords.length === 0}
+                            onClick={() => exportCsv(visibleRecords)}>
+                        <Download size={16} aria-hidden="true"/>Export CSV
                     </button>
                 </div>
                 <section className="record-list-container" aria-label="Record list">
@@ -644,9 +566,6 @@ function Dashboard() {
                                           onOpenSibling={openRecord}/>}
         <StatusPicker picker={picker} isUpdating={updateMutation.isPending} onSelect={changeStatus}
                       onClose={() => setPicker(null)}/>
-        {exportMutation.isError && <p className="mutation-toast"
-                                      role="alert">Could not export
-            CSV: {exportMutation.error instanceof Error ? exportMutation.error.message : "Unknown error"}</p>}
         {updateMutation.isError && <p className="mutation-toast"
                                       role="alert">{updateMutation.error instanceof Error ? updateMutation.error.message : "Could not update review status."}</p>}
     </main>;
