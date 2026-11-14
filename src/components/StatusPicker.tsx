@@ -3,7 +3,10 @@ import {Check, ChevronDown} from "lucide-react";
 import type {Replicate, ReviewStatus} from "../types";
 import {STATUS_COLUMNS, statusLabel} from "./status";
 
-export function StatusPill({record, onOpen}: { record: Replicate; onOpen: (anchor: HTMLElement, record: Replicate) => void }) {
+export function StatusPill({record, onOpen}: {
+    record: Replicate;
+    onOpen: (anchor: HTMLElement, record: Replicate) => void
+}) {
     return <button className={`status-pill ${record.reviewStatus}`} type="button" onClick={(event) => {
         event.stopPropagation();
         onOpen(event.currentTarget, record);
@@ -46,11 +49,11 @@ export function StatusPicker({picker, isUpdating, onSelect, onClose}: {
     if (!picker) return null;
     const isDesktop = window.matchMedia("(min-width: 900px)").matches;
     return <div className="sheet-scrim" role="presentation" onMouseDown={onClose}>
-        <section className="status-sheet open" aria-label={`Change status for ${picker.record.sampleId}`}
+        <section className="status-sheet open" aria-label={`Change status for ${picker.record.replicateLabel}`}
                  onMouseDown={(event) => event.stopPropagation()}
                  style={isDesktop ? {left: position.left, top: position.top} : undefined}>
             <div className="sheet-grabber" aria-hidden="true"/>
-            <p className="sheet-title">Move record to</p>
+            <p className="sheet-title">Move photo to</p>
             <div className="status-sheet-options">
                 {STATUS_COLUMNS.map((column) => {
                     const isCurrent = column.key === picker.record.reviewStatus;

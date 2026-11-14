@@ -13,17 +13,26 @@ import {
     X
 } from "lucide-react";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
-import {fetchReplicates, updateStatus} from "./api";
+import {downloadReplicatesCsv, fetchSamples, setManualOverride, updateStatus} from "./api";
 import {AuthGate} from "./AuthGate";
 import {supabase} from "./supabase";
-import type {GrainBox, Replicate, ReviewStatus} from "./types";
+import type {GrainBox, Replicate, ReviewStatus, SampleRecord} from "./types";
 import {StatusPicker, StatusPill, type StatusPickerState} from "./components/StatusPicker";
 import {STATUS_COLUMNS, statusLabel} from "./components/status";
-import {exportCsv} from "./export";
+import {formatConfidence, QualityBadge, qualityLabel, replicateSuffix} from "./components/Quality.tsx";
 import "./App.css";
 
 type View = "row" | "kanban";
 type SortOption = "name-asc" | "name-desc" | "date-desc" | "date-asc";
+type Filter = "all" | ReviewStatus;
+
+const FILTERS: Array<{ key: Filter; label: string }> = [
+    {key: "all", label: "All"},
+    {key: "review", label: "Review"},
+    {key: "accepted", label: "Accepted"},
+    {key: "rejected", label: "Has rejected"},
+    {key: "retraining", label: "Has retraining"},
+];
 
 function formatDate(value: string): string {
     const date = new Date(value);
@@ -43,7 +52,7 @@ function formatOptionalDate(value: string | null): string {
     return value ? formatDate(value) : EM_DASH;
 }
 
-function formatSampleNo(record: Replicate): string {
+function formatSampleNo(record: { sampleNo: number | null }): string {
     return record.sampleNo ? `${record.sampleNo} of 2` : EM_DASH;
 }
 
@@ -60,9 +69,38 @@ function formatGrade(grade: string): string {
     return grade === "Below Standard" ? "Not classified" : grade;
 }
 
-function findSibling(record: Replicate, records: Replicate[]): Replicate | null {
-    if (!record.season || !record.indexNumber) return null;
-    return records.find((other) => other.id !== record.id && other.season === record.season && other.indexNumber === record.indexNumber) ?? null;
+function sampleKey(sample: SampleRecord): string {
+    return `${sample.season ?? ""}|${sample.indexNumber ?? ""}|${sample.sampleNo ?? ""}`;
+}
+
+function sampleCaptureTime(sample: SampleRecord): string {
+    return sample.replicates.map(captureTime).reduce((latest, value) => new Date(value).getTime() > new Date(latest).getTime() ? value : latest);
+}
+
+function sampleTechnicians(sample: SampleRecord): string {
+    return [...new Set(sample.replicates.map((record) => record.technicianName))].join(", ");
+}
+
+function formatSampleResult(sample: SampleRecord): string {
+    if (sample.averageGrade == null || sample.averagePercentage == null) return "Pending";
+    return `${formatGrade(sample.averageGrade)} \u00b7 ${sample.averagePercentage.toFixed(1)}%`;
+}
+
+function matchesFilter(sample: SampleRecord, filter: Filter): boolean {
+    if (filter === "all") return true;
+    if (filter === "review" || filter === "accepted") return sample.status === filter;
+    return sample.replicates.some((record) => record.reviewStatus === filter);
+}
+
+function findSiblingSample(sample: SampleRecord, samples: SampleRecord[]): SampleRecord | null {
+    if (!sample.season || !sample.indexNumber) return null;
+    return samples.find((other) => sampleKey(other) !== sampleKey(sample) && other.season === sample.season && other.indexNumber === sample.indexNumber) ?? null;
+}
+
+function patchReplicate(samples: SampleRecord[] = [], id: string, patch: Partial<Replicate>): SampleRecord[] {
+    return samples.map((sample) => sample.replicates.some((record) => record.id === id)
+        ? {...sample, replicates: sample.replicates.map((record) => record.id === id ? {...record, ...patch} : record)}
+        : sample);
 }
 
 const ZOOM_LEVELS = [1, 1.5, 2, 3, 4, 6];
@@ -202,12 +240,40 @@ function ImageTiers({record}: { record: Replicate }) {
     </>);
 }
 
-function DetailOverlay({record, sibling, onClose, onOpenStatus, onOpenSibling}: {
+function PhotoChips({sample}: { sample: SampleRecord }) {
+    return <div className="photo-chips">
+        {sample.replicates.map((record) => {
+            const text = [replicateSuffix(record), qualityLabel(record.quality), formatGrade(record.grade), formatConfidence(record.confidence)].join(" \u00b7 ");
+            return <span key={record.id} className={`photo-chip ${record.quality}`}
+                         title={`${record.replicateLabel}: ${text}`}>{text}</span>;
+        })}
+    </div>;
+}
+
+function SampleStatusBadge({sample}: { sample: SampleRecord }) {
+    return <span className={`status-pill static ${sample.status}`}>{statusLabel(sample.status)}</span>;
+}
+
+function DetailOverlay({
+                           sample,
+                           record,
+                           sibling,
+                           isOverriding,
+                           onClose,
+                           onOpenStatus,
+                           onSelectReplicate,
+                           onToggleOverride,
+                           onOpenSibling
+                       }: {
+    sample: SampleRecord;
     record: Replicate;
-    sibling: Replicate | null;
+    sibling: SampleRecord | null;
+    isOverriding: boolean;
     onClose: () => void;
     onOpenStatus: (anchor: HTMLElement, record: Replicate) => void;
-    onOpenSibling: (record: Replicate) => void;
+    onSelectReplicate: (record: Replicate) => void;
+    onToggleOverride: (record: Replicate) => void;
+    onOpenSibling: (sample: SampleRecord) => void;
 }) {
     useEffect(() => {
         const closeOnEscape = (event: KeyboardEvent) => {
@@ -220,35 +286,101 @@ function DetailOverlay({record, sibling, onClose, onOpenStatus, onOpenSibling}: 
         <section className="detail-panel" role="dialog" aria-modal="true" aria-labelledby="detail-title"
                  onMouseDown={(event) => event.stopPropagation()}>
             <header className="detail-header">
-                <div><h2 id="detail-title">Record detail</h2><p>{record.id}</p></div>
-                <button className="icon-button" type="button" aria-label="Close record detail" onClick={onClose}><X
+                <div><h2 id="detail-title">Sample detail</h2><p>{sample.sampleId}</p></div>
+                <button className="icon-button" type="button" aria-label="Close sample detail" onClick={onClose}><X
                     size={20} aria-hidden="true"/></button>
             </header>
-            <div className="detail-body"><ImageTiers record={record}/>
+            <div className="detail-body">
+                <h3 className="section-title">Sample summary</h3>
                 <dl className="record-metadata">
                     <div>
                         <dt>Sample ID</dt>
-                        <dd>{record.sampleId}</dd>
+                        <dd>{sample.sampleId}</dd>
                     </div>
                     <div>
                         <dt>Sample</dt>
-                        <dd>{formatSampleNo(record)}</dd>
+                        <dd>{formatSampleNo(sample)}</dd>
+                    </div>
+                    <div>
+                        <dt>Status</dt>
+                        <dd><SampleStatusBadge sample={sample}/></dd>
+                    </div>
+                    <div>
+                        <dt>Season</dt>
+                        <dd>{sample.season ?? EM_DASH}</dd>
+                    </div>
+                    <div>
+                        <dt>Index no.</dt>
+                        <dd>{sample.indexNumber ?? EM_DASH}</dd>
+                    </div>
+                    <div>
+                        <dt>Selection name</dt>
+                        <dd>{sample.selectionName ?? EM_DASH}</dd>
+                    </div>
+                    <div>
+                        <dt>Photos</dt>
+                        <dd>{sample.replicateCount} ({sample.goodCount} good)</dd>
+                    </div>
+                    <div>
+                        <dt>Average weight</dt>
+                        <dd>{sample.averageWeight == null ? EM_DASH : `${sample.averageWeight} g`}</dd>
+                    </div>
+                    <div>
+                        <dt>Average percentage</dt>
+                        <dd>{sample.averagePercentage == null ? EM_DASH : `${sample.averagePercentage.toFixed(1)}%`}</dd>
+                    </div>
+                    <div>
+                        <dt>Average grade</dt>
+                        <dd>{sample.averageGrade == null ? "Pending" : formatGrade(sample.averageGrade)}</dd>
+                    </div>
+                    <div>
+                        <dt>Recommended value</dt>
+                        <dd>{sample.meetsRecommendedValue == null ? EM_DASH : sample.meetsRecommendedValue ? "Meets (below 2.0%)" : "Does not meet"}</dd>
+                    </div>
+                </dl>
+                {sample.status !== "accepted" && <p className="override-hint">
+                    The average is calculated automatically once the sample has 2 good (or manually overridden) photos.
+                </p>}
+
+                <h3 className="section-title">Photos</h3>
+                <div className="photo-tabs" role="tablist" aria-label="Photos of this sample">
+                    {sample.replicates.map((photo) => <button key={photo.id} type="button" role="tab"
+                                                              aria-selected={photo.id === record.id}
+                                                              className={`photo-tab ${photo.id === record.id ? "active" : ""}`}
+                                                              onClick={() => onSelectReplicate(photo)}>
+                        <span>{replicateSuffix(photo)}</span><QualityBadge record={photo}/>
+                    </button>)}
+                </div>
+
+                <ImageTiers key={record.id} record={record}/>
+                <dl className="record-metadata">
+                    <div>
+                        <dt>Replicate</dt>
+                        <dd>{record.replicateLabel}</dd>
+                    </div>
+                    <div>
+                        <dt>Quality</dt>
+                        <dd><QualityBadge record={record}/></dd>
+                    </div>
+                    <div>
+                        <dt>Confidence</dt>
+                        <dd>{formatConfidence(record.confidence)}</dd>
+                    </div>
+                    <div>
+                        <dt>Grade</dt>
+                        <dd>{formatGrade(record.grade)}</dd>
+                    </div>
+                    <div>
+                        <dt>Immature weight</dt>
+                        <dd>{record.immatureWeight} g</dd>
+                    </div>
+                    <div>
+                        <dt>Percentage</dt>
+                        <dd>{record.percentage.toFixed(1)}%</dd>
                     </div>
                     <div>
                         <dt>Technician</dt>
                         <dd>{record.technicianName}</dd>
-                    </div>
-                    <div>
-                        <dt>Season</dt>
-                        <dd>{record.season ?? EM_DASH}</dd>
-                    </div>
-                    <div>
-                        <dt>Index no.</dt>
-                        <dd>{record.indexNumber ?? EM_DASH}</dd>
-                    </div>
-                    <div>
-                        <dt>Selection name</dt>
-                        <dd>{record.selectionName ?? EM_DASH}</dd>
                     </div>
                     <div>
                         <dt>Captured</dt>
@@ -267,48 +399,45 @@ function DetailOverlay({record, sibling, onClose, onOpenStatus, onOpenSibling}: 
                         <dd>{formatDate(record.createdAt)}</dd>
                     </div>
                     <div>
-                        <dt>Grade</dt>
-                        <dd>{formatGrade(record.grade)}</dd>
-                    </div>
-                    <div>
-                        <dt>Immature weight</dt>
-                        <dd>{record.immatureWeight} g</dd>
-                    </div>
-                    <div>
-                        <dt>Percentage</dt>
-                        <dd>{record.percentage.toFixed(1)}%</dd>
-                    </div>
-                    <div>
                         <dt>Recommended value</dt>
                         <dd>{record.meetsRecommendedValue == null ? EM_DASH : record.meetsRecommendedValue ? "Meets (below 2.0%)" : "Does not meet"}</dd>
                     </div>
+                    <div>
+                        <dt>Record ID</dt>
+                        <dd>{record.id}</dd>
+                    </div>
                 </dl>
+                <button className={`override-button ${record.manuallyOverridden ? "active" : ""}`} type="button"
+                        aria-pressed={record.manuallyOverridden} disabled={isOverriding}
+                        onClick={() => onToggleOverride(record)}>
+                    {record.manuallyOverridden ? "Remove manual override" : "Override: mark this photo as good"}
+                </button>
+                <p className="override-hint">A photo is good when its confidence is high enough or it has been manually
+                    overridden.</p>
                 {sibling && <button className="sibling-link" type="button" onClick={() => onOpenSibling(sibling)}>
                     View other sample of this entry ({formatSampleNo(sibling)}: {sibling.sampleId})
                 </button>}
             </div>
-            <footer className="detail-footer"><span>Status</span><StatusPill record={record} onOpen={onOpenStatus}/>
+            <footer className="detail-footer"><span>Photo status ({replicateSuffix(record)})</span><StatusPill
+                record={record} onOpen={onOpenStatus}/>
             </footer>
         </section>
     </div>;
 }
 
-function RecordCard({record, onOpen, onOpenStatus}: {
-    record: Replicate;
-    onOpen: (record: Replicate) => void;
-    onOpenStatus: (anchor: HTMLElement, record: Replicate) => void
-}) {
-    return <article className="record-card" tabIndex={0} onClick={() => onOpen(record)} onKeyDown={(event) => {
+function SampleCard({sample, onOpen}: { sample: SampleRecord; onOpen: (sample: SampleRecord) => void }) {
+    return <article className="record-card" tabIndex={0} onClick={() => onOpen(sample)} onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
-            onOpen(record);
+            onOpen(sample);
         }
     }}>
-        <div className="record-card-top"><strong>{record.sampleId}</strong><StatusPill record={record}
-                                                                                       onOpen={onOpenStatus}/></div>
-        <p>{record.technicianName}</p>
-        {record.indexNumber && <p>{record.season} · Index {record.indexNumber} · Sample {formatSampleNo(record)}</p>}
-        <span>{formatDate(captureTime(record))}</span>
+        <div className="record-card-top"><strong>{sample.sampleId}</strong><SampleStatusBadge sample={sample}/></div>
+        <p>{sampleTechnicians(sample)}</p>
+        {sample.indexNumber && <p>{sample.season} · Index {sample.indexNumber} · Sample {formatSampleNo(sample)}</p>}
+        <p>Result: {formatSampleResult(sample)}</p>
+        <PhotoChips sample={sample}/>
+        <span>{formatDate(sampleCaptureTime(sample))}</span>
     </article>;
 }
 
@@ -335,9 +464,11 @@ function KanbanCard({record, onOpen, onOpenStatus, onDragStart, onDragEnd}: {
         if (event.key === "Enter") onOpen(record);
     }}>
         <div className="kanban-card-title"><GripVertical size={15}
-                                                         aria-hidden="true"/><strong>{record.sampleId}</strong></div>
+                                                         aria-hidden="true"/><strong>{record.replicateLabel}</strong>
+        </div>
         <p>{record.technicianName}</p>
         {record.indexNumber && <p>{record.season} · Index {record.indexNumber} · Sample {formatSampleNo(record)}</p>}
+        <p><QualityBadge record={record}/> {formatGrade(record.grade)} · {formatConfidence(record.confidence)}</p>
         <span>{formatDate(captureTime(record))}</span>
         <button className="kanban-card-move" type="button" onClick={(event) => {
             event.stopPropagation();
@@ -350,7 +481,7 @@ function KanbanCard({record, onOpen, onOpenStatus, onDragStart, onDragEnd}: {
 function Dashboard() {
     const queryClient = useQueryClient();
     const [view, setView] = useState<View>("row");
-    const [filter, setFilter] = useState<"all" | ReviewStatus>("all");
+    const [filter, setFilter] = useState<Filter>("all");
     const [searchTerm, setSearchTerm] = useState("");
     const [sort, setSort] = useState<SortOption>("name-asc");
     const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -358,52 +489,71 @@ function Dashboard() {
     const [activeKanbanTab, setActiveKanbanTab] = useState<ReviewStatus>("review");
     const [draggedId, setDraggedId] = useState<string | null>(null);
     const [dropTarget, setDropTarget] = useState<ReviewStatus | null>(null);
-    const {data: records = [], error, isLoading, isError} = useQuery({
-        queryKey: ["replicates"],
-        queryFn: fetchReplicates
+    const {data: samples = [], error, isLoading, isError} = useQuery({
+        queryKey: ["samples"],
+        queryFn: fetchSamples
     });
+    const records = useMemo(() => samples.flatMap((sample) => sample.replicates), [samples]);
 
     const updateMutation = useMutation({
         mutationFn: ({id, status}: { id: string; status: ReviewStatus }) => updateStatus(id, status),
         onMutate: async ({id, status}) => {
-            await queryClient.cancelQueries({queryKey: ["replicates"]});
-            const previous = queryClient.getQueryData<Replicate[]>(["replicates"]);
-            queryClient.setQueryData<Replicate[]>(["replicates"], (current = []) => current.map((record) => record.id === id ? {
-                ...record,
-                reviewStatus: status
-            } : record));
+            await queryClient.cancelQueries({queryKey: ["samples"]});
+            const previous = queryClient.getQueryData<SampleRecord[]>(["samples"]);
+            queryClient.setQueryData<SampleRecord[]>(["samples"], (current) => patchReplicate(current, id, {reviewStatus: status}));
             return {previous};
         },
-        onError: (_error, _variables, context) => queryClient.setQueryData(["replicates"], context?.previous),
-        onSuccess: (updated) => queryClient.setQueryData<Replicate[]>(["replicates"], (current = []) => current.map((record) => record.id === updated.id ? {
-            ...record,
-            reviewStatus: updated.reviewStatus
-        } : record)),
-        onSettled: () => void queryClient.invalidateQueries({queryKey: ["replicates"]}),
+        onError: (_error, _variables, context) => queryClient.setQueryData(["samples"], context?.previous),
+        onSuccess: (updated) => queryClient.setQueryData<SampleRecord[]>(["samples"], (current) => patchReplicate(current, updated.id, {reviewStatus: updated.reviewStatus})),
+        // The backend may auto-accept the sample after a status change, so always refetch the grouped records.
+        onSettled: () => void queryClient.invalidateQueries({queryKey: ["samples"]}),
     });
 
-    const visibleRecords = useMemo(() => {
+    const overrideMutation = useMutation({
+        mutationFn: ({id, overridden}: { id: string; overridden: boolean }) => setManualOverride(id, overridden),
+        onSuccess: (updated) => queryClient.setQueryData<SampleRecord[]>(["samples"], (current) => patchReplicate(current, updated.id, {
+            manuallyOverridden: updated.manuallyOverridden,
+            quality: updated.quality,
+            reviewStatus: updated.reviewStatus
+        })),
+        // An override can complete the sample (2 good photos), which changes its status and average.
+        onSettled: () => void queryClient.invalidateQueries({queryKey: ["samples"]}),
+    });
+
+    // Uses the backend export endpoint, which exports every record.
+    const exportMutation = useMutation({mutationFn: downloadReplicatesCsv});
+
+    const visibleSamples = useMemo(() => {
         const term = searchTerm.trim().toLowerCase();
-        const filtered = records.filter((record) => (filter === "all" || record.reviewStatus === filter) && (!term || [record.id, record.sampleId, record.technicianName, record.indexNumber, record.season, record.selectionName].some((field) => (field ?? "").toLowerCase().includes(term))));
+        const filtered = samples.filter((sample) => matchesFilter(sample, filter) && (!term || [sample.sampleId, sample.indexNumber, sample.season, sample.selectionName, ...sample.replicates.flatMap((record) => [record.id, record.replicateLabel, record.technicianName])].some((field) => (field ?? "").toLowerCase().includes(term))));
         const [key, direction] = sort.split("-") as ["name" | "date", "asc" | "desc"];
         return filtered.toSorted((left, right) => {
-            const comparison = key === "name" ? left.sampleId.localeCompare(right.sampleId) : captureTime(left).localeCompare(captureTime(right));
+            const comparison = key === "name" ? left.sampleId.localeCompare(right.sampleId) : sampleCaptureTime(left).localeCompare(sampleCaptureTime(right));
             return direction === "asc" ? comparison : -comparison;
         });
-    }, [filter, records, searchTerm, sort]);
+    }, [filter, samples, searchTerm, sort]);
 
-    const selectedRecord = records.find((record) => record.id === selectedId) ?? null;
-    const selectedSibling = selectedRecord ? findSibling(selectedRecord, records) : null;
+    const selectedSample = samples.find((sample) => sample.replicates.some((record) => record.id === selectedId)) ?? null;
+    const selectedRecord = selectedSample?.replicates.find((record) => record.id === selectedId) ?? null;
+    const selectedSibling = selectedSample ? findSiblingSample(selectedSample, samples) : null;
+    // Kanban columns hold individual photos, so these counts are per photo.
     const counts = useMemo(() => Object.fromEntries(STATUS_COLUMNS.map(({key}) => [key, records.filter((record) => record.reviewStatus === key).length])) as Record<ReviewStatus, number>, [records]);
+    const acceptedSamples = useMemo(() => samples.filter((sample) => sample.status === "accepted").length, [samples]);
     const openStatusPicker = (anchor: HTMLElement, record: Replicate) => setPicker({anchor, record});
     const changeStatus = (record: Replicate, status: ReviewStatus) => {
         if (record.reviewStatus !== status) updateMutation.mutate({id: record.id, status});
     };
+    const toggleOverride = (record: Replicate) => overrideMutation.mutate({
+        id: record.id,
+        overridden: !record.manuallyOverridden
+    });
     const toggleSort = (key: "name" | "date") => setSort((current) => {
         const [currentKey, direction] = current.split("-") as ["name" | "date", "asc" | "desc"];
         return currentKey === key ? `${key}-${direction === "asc" ? "desc" : "asc"}` as SortOption : `${key}-asc` as SortOption;
     });
     const openRecord = (record: Replicate) => setSelectedId(record.id);
+    const openSample = (sample: SampleRecord) => setSelectedId(sample.replicates[0].id);
+    const mutationError = updateMutation.error ?? overrideMutation.error ?? exportMutation.error;
 
     return <main className="app-shell">
         <aside className="sidebar"><p className="brand">Record checking</p>
@@ -423,23 +573,24 @@ function Dashboard() {
             <header className="page-header">
                 <div><h1>Record checking</h1><p>Review AI-generated detections and confirm the outcome.</p></div>
                 <div className="summary-row" aria-label="Record totals">
-                    <div className="summary-chip"><strong>{records.length}</strong><span>Total</span></div>
-                    {STATUS_COLUMNS.map((column) => <div className="summary-chip" key={column.key}>
-                        <strong>{counts[column.key]}</strong><span>{column.label}</span></div>)}</div>
+                    <div className="summary-chip"><strong>{samples.length}</strong><span>Samples</span></div>
+                    <div className="summary-chip"><strong>{records.length}</strong><span>Photos</span></div>
+                    <div className="summary-chip">
+                        <strong>{samples.length - acceptedSamples}</strong><span>In review</span></div>
+                    <div className="summary-chip"><strong>{acceptedSamples}</strong><span>Accepted</span></div>
+                </div>
             </header>
             <section className={`view-panel row-view ${view === "row" ? "active" : ""}`} aria-hidden={view !== "row"}>
                 <div className="toolbar-filter" aria-label="Record filters">
-                    <button className={filter === "all" ? "active" : ""} type="button"
-                            onClick={() => setFilter("all")}>All
-                    </button>
-                    {STATUS_COLUMNS.map((column) => <button key={column.key}
-                                                            className={filter === column.key ? "active" : ""}
-                                                            type="button"
-                                                            onClick={() => setFilter(column.key)}>{column.label}</button>)}
+                    {FILTERS.map((option) => <button key={option.key}
+                                                     className={filter === option.key ? "active" : ""}
+                                                     type="button"
+                                                     onClick={() => setFilter(option.key)}>{option.label}</button>)}
                 </div>
                 <div className="toolbar-secondary"><label className="search-field" htmlFor="record-search"><Search
                     size={17} aria-hidden="true"/><span className="visually-hidden">Search records</span><input
-                    id="record-search" type="search" placeholder="Search sample, index no., season, selection"
+                    id="record-search" type="search"
+                    placeholder="Search sample, index no., season, selection, technician"
                     value={searchTerm}
                     onChange={(event) => setSearchTerm(event.target.value)}/></label><label className="sort-field"><span
                     className="visually-hidden">Sort records</span><select value={sort}
@@ -450,21 +601,23 @@ function Dashboard() {
                     <option value="date-asc">Oldest</option>
                 </select></label>
                     <button className="export-button" type="button"
-                            disabled={visibleRecords.length === 0}
-                            onClick={() => exportCsv(visibleRecords)}>
-                        <Download size={16} aria-hidden="true"/>Export CSV
+                            title="Downloads every record from the server as CSV"
+                            disabled={records.length === 0 || exportMutation.isPending}
+                            onClick={() => exportMutation.mutate()}>
+                        <Download size={16}
+                                  aria-hidden="true"/>{exportMutation.isPending ? "Exporting..." : "Export CSV"}
                     </button>
                 </div>
                 <section className="record-list-container" aria-label="Record list">
                     {isLoading && <p className="view-message">Loading records...</p>}{isError &&
                     <p className="view-message error-message" role="alert">Could not load
-                        records: {error instanceof Error ? error.message : "Unknown error"}</p>}{!isLoading && !isError && records.length === 0 &&
+                        records: {error instanceof Error ? error.message : "Unknown error"}</p>}{!isLoading && !isError && samples.length === 0 &&
                     <p className="view-message">No submissions yet.</p>}
-                    {!isLoading && !isError && records.length > 0 && <>
-                        <div className="record-list-scroll">{visibleRecords.map((record) => <RecordCard key={record.id}
-                                                                                                        record={record}
-                                                                                                        onOpen={openRecord}
-                                                                                                        onOpenStatus={openStatusPicker}/>)}{visibleRecords.length === 0 &&
+                    {!isLoading && !isError && samples.length > 0 && <>
+                        <div className="record-list-scroll">{visibleSamples.map((sample) => <SampleCard
+                            key={sampleKey(sample)}
+                            sample={sample}
+                            onOpen={openSample}/>)}{visibleSamples.length === 0 &&
                             <p className="view-message">No records match the current filters.</p>}</div>
                         <div className="record-table-wrap">
                             <table>
@@ -478,30 +631,32 @@ function Dashboard() {
                                     <th>Index no.</th>
                                     <th>Season</th>
                                     <th>Samples</th>
+                                    <th>Photos (replicate · quality · grade · confidence)</th>
                                     <th>Technician</th>
                                     <th>
                                         <button type="button"
                                                 onClick={() => toggleSort("date")}>Captured {sort.startsWith("date") && (sort.endsWith("asc") ?
                                             <ArrowDownAZ size={14}/> : <ArrowUpAZ size={14}/>)}</button>
                                     </th>
-                                    <th>Grade</th>
+                                    <th>Result</th>
                                     <th>Status</th>
                                 </tr>
                                 </thead>
-                                <tbody>{visibleRecords.map((record) => <tr key={record.id} tabIndex={0}
-                                                                           onClick={() => openRecord(record)}
+                                <tbody>{visibleSamples.map((sample) => <tr key={sampleKey(sample)} tabIndex={0}
+                                                                           onClick={() => openSample(sample)}
                                                                            onKeyDown={(event) => {
-                                                                               if (event.key === "Enter") openRecord(record);
+                                                                               if (event.key === "Enter") openSample(sample);
                                                                            }}>
-                                    <td className="mono-cell">{record.sampleId}</td>
-                                    <td className="mono-cell">{record.indexNumber ?? EM_DASH}</td>
-                                    <td className="mono-cell">{record.season ?? EM_DASH}</td>
-                                    <td>{formatSampleNo(record)}</td>
-                                    <td>{record.technicianName}</td>
-                                    <td>{formatDate(captureTime(record))}</td>
-                                    <td>{formatGrade(record.grade)}</td>
-                                    <td><StatusPill record={record} onOpen={openStatusPicker}/></td>
-                                </tr>)}{visibleRecords.length === 0 && <tr>
+                                    <td className="mono-cell">{sample.sampleId}</td>
+                                    <td className="mono-cell">{sample.indexNumber ?? EM_DASH}</td>
+                                    <td className="mono-cell">{sample.season ?? EM_DASH}</td>
+                                    <td>{formatSampleNo(sample)}</td>
+                                    <td><PhotoChips sample={sample}/></td>
+                                    <td>{sampleTechnicians(sample)}</td>
+                                    <td>{formatDate(sampleCaptureTime(sample))}</td>
+                                    <td>{formatSampleResult(sample)}</td>
+                                    <td><SampleStatusBadge sample={sample}/></td>
+                                </tr>)}{visibleSamples.length === 0 && <tr>
                                     <td className="view-message" colSpan={9}>No records match the current filters.</td>
                                 </tr>}</tbody>
                             </table>
@@ -565,14 +720,18 @@ function Dashboard() {
             <button className={view === "kanban" ? "current" : ""} type="button" onClick={() => setView("kanban")}>
                 <Columns3 size={20}/><span>Kanban</span></button>
         </nav>
-        {selectedRecord && <DetailOverlay record={selectedRecord} sibling={selectedSibling}
-                                          onClose={() => setSelectedId(null)}
-                                          onOpenStatus={openStatusPicker}
-                                          onOpenSibling={openRecord}/>}
+        {selectedSample && selectedRecord && <DetailOverlay sample={selectedSample} record={selectedRecord}
+                                                            sibling={selectedSibling}
+                                                            isOverriding={overrideMutation.isPending}
+                                                            onClose={() => setSelectedId(null)}
+                                                            onOpenStatus={openStatusPicker}
+                                                            onSelectReplicate={openRecord}
+                                                            onToggleOverride={toggleOverride}
+                                                            onOpenSibling={openSample}/>}
         <StatusPicker picker={picker} isUpdating={updateMutation.isPending} onSelect={changeStatus}
                       onClose={() => setPicker(null)}/>
-        {updateMutation.isError && <p className="mutation-toast"
-                                      role="alert">{updateMutation.error instanceof Error ? updateMutation.error.message : "Could not update review status."}</p>}
+        {mutationError && <p className="mutation-toast"
+                             role="alert">{mutationError instanceof Error ? mutationError.message : "Something went wrong. Please try again."}</p>}
     </main>;
 }
 

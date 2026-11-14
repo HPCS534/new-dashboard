@@ -1,4 +1,4 @@
-import type {Replicate, ReviewStatus} from "./types";
+import type {OverrideResult, Replicate, ReviewStatus, SampleRecord} from "./types";
 import {supabase} from "./supabase";
 
 const BASE_URL = import.meta.env.DEV ? "" : import.meta.env.VITE_BACKEND_URL;
@@ -16,12 +16,12 @@ async function responseError(response: Response, fallback: string): Promise<Erro
     return new Error(detail || fallback);
 }
 
-export async function fetchReplicates(): Promise<Replicate[]> {
-    const response = await fetch(`${BASE_URL}/api/replicates`, {headers: await authHeaders()});
+export async function fetchSamples(): Promise<SampleRecord[]> {
+    const response = await fetch(`${BASE_URL}/api/samples`, {headers: await authHeaders()});
     if (!response.ok) {
-        throw await responseError(response, "Failed to fetch replicates");
+        throw await responseError(response, "Failed to fetch samples");
     }
-    return (await response.json()) as Replicate[];
+    return (await response.json()) as SampleRecord[];
 }
 
 function fileNameFromDisposition(header: string | null): string | null {
@@ -59,4 +59,16 @@ export async function updateStatus(replicateId: string, status: ReviewStatus,): 
         throw await responseError(response, "Failed to update status");
     }
     return (await response.json()) as { id: string; reviewStatus: ReviewStatus; };
+}
+
+export async function setManualOverride(replicateId: string, overridden: boolean): Promise<OverrideResult> {
+    const response = await fetch(`${BASE_URL}/api/replicates/${encodeURIComponent(replicateId)}/override`, {
+        method: "PATCH",
+        headers: await authHeaders({"Content-Type": "application/json"}),
+        body: JSON.stringify({overridden}),
+    });
+    if (!response.ok) {
+        throw await responseError(response, "Failed to update manual override");
+    }
+    return (await response.json()) as OverrideResult;
 }
