@@ -1,55 +1,103 @@
-# Record checking dashboard
+# Record Checking Dashboard
 
-## Temporary frontend password
+React and TypeScript dashboard for reviewing grain-record submissions and AI-generated grain detections.
 
-The dashboard is now hidden behind a password screen. Set a password in the untracked `.env` file, then restart the Vite server:
+## What it does
 
-```env
-VITE_DASHBOARD_PASSWORD=your-temporary-password
+- Authenticates users with Supabase email/password authentication.
+- Loads samples with their related replicate photos from the backend API.
+- Displays one row/card per sample in a searchable, sortable table or a Kanban board.
+- Groups all photos for a sample together and shows each photo's quality, grade, and confidence.
+- Filters samples by status: All, Review, Accepted, Has rejected, or Has retraining.
+- Opens record details with capture metadata, quality measurements, and image overlays.
+- Shows AI-predicted and reviewer-confirmed grain bounding boxes.
+- Updates photo review status through the backend API, including Kanban drag-and-drop.
+- Supports manually overriding a photo's quality classification.
+- Exports all records to CSV through the backend API.
+- Supports image zoom while preserving the current viewport.
+
+## Requirements
+
+- Node.js 20 or newer
+- npm
+- Access to the configured Supabase project
+- A running instance of the records backend
+
+## Local setup
+
+1. Install dependencies:
+
+   ```bash
+   npm install
+   ```
+
+2. Create a `.env` file in the project root:
+
+   ```env
+   VITE_BACKEND_URL=https://your-backend.example.com
+   VITE_SUPABASE_URL=https://your-project.supabase.co
+   VITE_SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-key
+   ```
+
+   `VITE_BACKEND_URL` is used by the Vite development proxy and by production builds. The Supabase URL and publishable key are used by the browser to sign users in. Do not put secret keys, service-role keys, or passwords in this file.
+
+3. Start the development server:
+
+   ```bash
+   npm run dev
+   ```
+
+   Open the URL printed by Vite, usually `http://localhost:5173`.
+
+## Available scripts
+
+| Command | Description |
+| --- | --- |
+| `npm run dev` | Start Vite with hot module replacement |
+| `npm run build` | Type-check and create a production build |
+| `npm run lint` | Run Oxlint |
+| `npm run preview` | Serve the production build locally |
+
+Run the build and linter before opening a pull request:
+
+```bash
+npm run lint
+npm run build
 ```
 
-`.env.example` shows the complete local environment format. A successful entry is remembered only for the current browser tab/session; closing the tab requires the password again.
+## Backend API
 
-This is deliberately a temporary UI gate, not real protection. Values beginning with `VITE_` are shipped to the browser and can be inspected by a determined viewer. The app also needs its API to enforce access before sensitive records are considered protected.
+The frontend expects these authenticated endpoints:
 
-## Backend integration later
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/samples` | Load grouped samples and their replicate photos |
+| `GET` | `/api/replicates/export` | Download a server-generated CSV containing all records |
+| `PATCH` | `/api/replicates/:id/status` | Update a photo's review status |
+| `PATCH` | `/api/replicates/:id/override` | Set or remove a manual photo-quality override |
 
-1. Create `POST /api/auth/login` that accepts `{ "password": "..." }`, validates a server-side password hash, and returns an opaque session cookie (`HttpOnly`, `Secure`, `SameSite`) or a short-lived access token. Rate-limit failed attempts.
-2. Require that session/token on every existing records, images, and update-status endpoint. Do not rely on the frontend gate or the current API key alone.
-3. Change `PasswordGate.tsx` so submit calls `/api/auth/login`; unlock only after a successful response. For cookie sessions, use `credentials: "include"` in API fetches. For tokens, keep them in memory where possible and attach `Authorization: Bearer <token>`.
-4. Add `POST /api/auth/logout`, clear the session/token in the UI, and redirect back to the password screen on `401` or `403` responses.
+Requests include the current Supabase access token in the Authorization header. The backend must validate that token and enforce access control; the frontend login screen is not a substitute for server-side authorization.
 
-Until then, set `VITE_DASHBOARD_PASSWORD` locally as described above.
+During development, Vite proxies `/api` requests to `VITE_BACKEND_URL`. In a production build, requests use `VITE_BACKEND_URL` directly.
 
-# React + TypeScript + Vite
+## Project structure
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
-
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```text
+src/
+├── App.tsx                 Dashboard views, filtering, sorting, and record details
+├── AuthGate.tsx            Supabase sign-in screen and session gate
+├── api.ts                  Authenticated backend requests
+├── export.ts               CSV export helpers
+├── supabase.ts             Supabase client configuration
+├── types.ts                Record and grain-box types
+└── components/
+    ├── Quality.tsx         Photo-quality and confidence display helpers
+    ├── StatusPicker.tsx    Review-status controls
+    └── status.ts           Review-status labels and columns
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Authentication and configuration
+
+Supabase manages the browser session. Users must have an account in the configured Supabase project and sign in with their email and password. Logging out clears the local Supabase session.
+
+All `VITE_*` variables are embedded in the browser bundle. Only use browser-safe values, such as a Supabase publishable key. Keep backend secrets and service-role credentials on the server.
