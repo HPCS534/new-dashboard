@@ -37,7 +37,8 @@ test.describe("dashboard integration", () => {
         await signIn(page, account);
 
         const response = await samplesResponse;
-        expect(response.status()).toBe(200);
+        const responseBody = await response.text();
+        expect(response.status(), `GET /api/samples returned ${response.status()}: ${responseBody}`).toBe(200);
         await expect(page.getByRole("region", {name: "Record list"})).toBeVisible();
         await expect(page.getByRole("button", {name: "Logout"})).toBeVisible();
     });
