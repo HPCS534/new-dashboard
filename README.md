@@ -57,6 +57,11 @@ React and TypeScript dashboard for reviewing grain-record submissions and AI-gen
 | `npm run build` | Type-check and create a production build |
 | `npm run lint` | Run Oxlint |
 | `npm run preview` | Serve the production build locally |
+| `npm run test:unit` | Run unit tests |
+| `npm run test:integration` | Run browser/API integration tests |
+| `npm run test:system` | Run system tests |
+| `npm run test:performance:browser` | Run browser performance tests |
+| `npm run test:all` | Run the unit, integration, and system suites |
 
 Run the build and linter before opening a pull request:
 

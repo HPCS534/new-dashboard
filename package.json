@@ -7,7 +7,12 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "playwright test tests/integration",
+    "test:system": "playwright test tests/system",
+    "test:performance:browser": "playwright test tests/performance",
+    "test:all": "npm run test:unit && npm run test:integration && npm run test:system"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",
@@ -17,12 +22,18 @@
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.12",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",
+    "jsdom": "^29.1.1",
     "oxlint": "^1.75.0",
     "typescript": "~6.0.2",
-    "vite": "^8.2.0"
+    "vite": "^8.2.0",
+    "vitest": "^5.1.0"
   }
 }
