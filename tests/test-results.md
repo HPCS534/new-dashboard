@@ -87,7 +87,8 @@ Chromium and the running backend.
 | TC-ID | Title | Type | Command | Result |
 |---|---|---|---|---|
 | TC-SYS-01 | Navigate between dashboard views and log out | System/functional | `npm run test:system` | PASS |
-| TC-SYS-02 | Verify empty dashboard state and controls | System/functional | `npm run test:system` | PASS |
+| TC-SYS-02 | Verify populated dashboard controls and CSV availability | System/functional | `npm run test:system` | PASS |
+| TC-SYS-03 | Review populated sample, filter it, open details, and export CSV | System/functional | `npm run test:system -- --grep "reviews a populated sample"` | PASS |
 
 ### TC-SYS-01 steps
 
@@ -103,17 +104,30 @@ Chromium and the running backend.
 ### TC-SYS-02 steps
 
 1. Sign in — **PASS**
-2. Verify the empty-state message — **PASS**
-3. Verify CSV export is disabled with no records — **PASS**
+2. Verify the seeded sample row is visible — **PASS**
+3. Verify CSV export is enabled — **PASS**
 4. Verify the status filter is visible — **PASS**
 5. Verify the sample-search control is visible — **PASS**
 
-**System total:** 2 passed, 0 failed.
+### TC-SYS-03 steps
+
+1. Sign in — **PASS**
+2. Verify the populated sample, selection, and replicate quality chips are visible — **PASS**
+3. Search for `IND-001` — **PASS**
+4. Filter to Accepted records — **PASS**
+5. Open the sample details — **PASS**
+6. Verify sample summary values and two photo tabs — **PASS**
+7. Verify AI and reviewer image-panel captions — **PASS**
+8. Close the details and export CSV — **PASS**
+9. Verify the downloaded filename — **PASS**
+
+**System total:** 3 passed, 0 failed.
 
 **Bugs found:** None in the final run.
 
-**Could not run:** Populated-record user flows were not run because the local
-database contained zero sample records.
+**Could not run:** Empty-state behavior was not run in this seeded-data session because
+the local database intentionally contains populated records. It remains covered by the
+previous baseline evidence.
 
 ## Performance tests
 

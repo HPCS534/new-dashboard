@@ -19,12 +19,46 @@ test.describe("dashboard system flows", () => {
         await expect(page.getByRole("button", {name: "Sign in"})).toBeVisible();
     });
 
-    test("shows the empty-state dashboard when no records exist", async ({page}) => {
+    test("shows populated dashboard controls and enables CSV export", async ({page}) => {
         await signIn(page);
 
-        await expect(page.getByText("No submissions yet.")).toBeVisible();
-        await expect(page.getByRole("button", {name: "Export CSV"})).toBeDisabled();
+        await expect(page.locator("table tbody tr").filter({hasText: "2026WS-IND-001-S01"})).toBeVisible();
+        await expect(page.getByRole("button", {name: "Export CSV"})).toBeEnabled();
         await expect(page.getByRole("button", {name: "All"})).toBeVisible();
         await expect(page.getByPlaceholder(/Search sample/)).toBeVisible();
+    });
+
+    test("reviews a populated sample, filters it, opens details, and exports CSV", async ({page}) => {
+        await signIn(page);
+
+        const sampleId = "2026WS-IND-001-S01";
+        const sampleRow = page.locator("table tbody tr").filter({hasText: sampleId});
+        await expect(sampleRow).toBeVisible();
+        await expect(sampleRow).toContainText("2026WS");
+        await expect(sampleRow).toContainText("IND-001");
+        await expect(sampleRow).toContainText("G1");
+
+        await page.getByPlaceholder(/Search sample/).fill("IND-001");
+        await expect(sampleRow).toBeVisible();
+        await page.getByRole("button", {name: "Accepted", exact: true}).click();
+        await expect(sampleRow).toBeVisible();
+
+        await sampleRow.click();
+        const detail = page.getByRole("dialog", {name: "Sample detail"});
+        await expect(detail).toBeVisible();
+        await expect(detail).toContainText(sampleId);
+        await expect(detail).toContainText("2 (1 good)");
+        await expect(detail).toContainText("12.25 g");
+        await expect(detail).toContainText("Does not meet");
+        await expect(detail.getByRole("tab")).toHaveCount(2);
+        await expect(detail).toContainText("AI prediction (1)");
+        await expect(detail).toContainText("Reviewer correction (1)");
+        await expect(detail).toContainText("2026WS-IND-001-S01-01");
+
+        const download = page.waitForEvent("download");
+        await page.getByRole("button", {name: "Close sample detail"}).click();
+        await page.getByRole("button", {name: "Export CSV"}).click();
+        const exportedFile = await download;
+        expect(exportedFile.suggestedFilename()).toMatch(/^granular-records-\d{8}\.csv$/);
     });
 });
