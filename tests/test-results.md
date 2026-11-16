@@ -9,7 +9,7 @@
 | Backend | `http://localhost:5153` |
 | Backend readiness | `GET /health` returned HTTP 200 |
 | Full-suite command | `npm run test:all` |
-| Full-suite exit code | `0` for the previous empty-state baseline |
+| Full-suite exit code | `0` |
 | Populated integration command | `npm run test:integration -- --grep "preserves populated sample and replicate data"` |
 | Populated integration exit code | `0` |
 | Overall result | PASS for the implemented frontend tests; populated-data integration evidence is included below |
@@ -131,13 +131,14 @@ previous baseline evidence.
 
 ## Performance tests
 
-Performance tests measured speed rather than correctness. Correctness assertions were
-used only to exclude failed requests from the timing results.
+Performance tests measured speed against the seeded populated sample rather than
+correctness. Correctness assertions were used only to exclude failed requests from
+the timing results.
 
 | TC-ID | Title | Type | Command | Result |
 |---|---|---|---|---|
-| TC-PERF-01 | Measure repeated dashboard sign-in and list-load timing | Browser performance | `npm run test:performance:browser` | PASS |
-| TC-PERF-02 | Measure authenticated samples API latency | API performance | `npm run test:performance:api` | PASS |
+| TC-PERF-01 | Measure repeated populated dashboard sign-in and list-load timing | Browser performance | `npm run test:performance:browser` | PASS |
+| TC-PERF-02 | Measure authenticated populated samples API latency | API performance | `npm run test:performance:api` | PASS |
 
 ### TC-PERF-01 browser timing
 
@@ -145,10 +146,10 @@ used only to exclude failed requests from the timing results.
 |---|---:|
 | Users | 1 |
 | Iterations | 5 |
-| Cold start | 1298 ms |
-| p50 | 729 ms |
-| p95 | 1298 ms |
-| Maximum | 1298 ms |
+| Cold start | 762 ms |
+| p50 | 628 ms |
+| p95 | 762 ms |
+| Maximum | 762 ms |
 | Error rate | 0% |
 
 ### TC-PERF-02 k6 API timing
@@ -157,17 +158,17 @@ used only to exclude failed requests from the timing results.
 |---|---:|
 | Virtual users | 1 |
 | Duration | 30 seconds |
-| Iterations | 17,406 |
-| p50 | 1.37 ms |
-| p95 | 2.59 ms |
-| Maximum | 65.68 ms |
+| Iterations | 16,024 |
+| p50 | 1.48 ms |
+| p95 | 2.62 ms |
+| Maximum | 59.79 ms |
 | Error rate | 0% |
 | HTTP request failure rate | 0% |
 
 **Bugs found:** None in the final browser or API performance runs.
 
 **Could not run:** Multi-user load, stress, and soak profiles were not run. The
-current performance scope is a one-user baseline.
+current performance scope is a one-user populated-data baseline.
 
 ## Compliance assessment
 

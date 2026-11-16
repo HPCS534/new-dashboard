@@ -14,7 +14,7 @@ test("measures dashboard list-load performance", async ({page}) => {
     for (let index = 0; index < iterations; index += 1) {
         const start = Date.now();
         await signIn(page);
-        await expect(page.getByText("No submissions yet.")).toBeVisible();
+        await expect(page.locator("table tbody tr").filter({hasText: "2026WS-IND-001-S01"})).toBeVisible();
         const hasError = await page.getByRole("alert").count() > 0;
         const duration = Date.now() - start;
 
