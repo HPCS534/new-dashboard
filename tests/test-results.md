@@ -9,8 +9,10 @@
 | Backend | `http://localhost:5153` |
 | Backend readiness | `GET /health` returned HTTP 200 |
 | Full-suite command | `npm run test:all` |
-| Full-suite exit code | `0` |
-| Overall result | PASS for implemented frontend tests; integration boundary limitations documented below |
+| Full-suite exit code | `0` for the previous empty-state baseline |
+| Populated integration command | `npm run test:integration -- --grep "preserves populated sample and replicate data"` |
+| Populated integration exit code | `0` |
+| Overall result | PASS for the implemented frontend tests; populated-data integration evidence is included below |
 
 The test account and Supabase values were supplied through environment variables. No
 credentials were stored in this report or repository.
@@ -37,6 +39,7 @@ running backend. No frontend mock server or mocked API response was used.
 |---|---|---|---|---|
 | TC-INT-01 | Reject invalid credentials without opening the dashboard | Integration | `npm run test:integration` | PASS |
 | TC-INT-02 | Authenticate and load samples from the backend | Integration | `npm run test:integration` | PASS |
+| TC-INT-03 | Preserve populated sample and replicate data from the backend | Integration | `npm run test:integration -- --grep "preserves populated sample and replicate data"` | PASS |
 
 ### TC-INT-01 steps
 
@@ -53,23 +56,28 @@ running backend. No frontend mock server or mocked API response was used.
 4. Backend returns HTTP 200 — **PASS**
 5. Frontend parses the response as a sample list and renders the record-list region — **PASS**
 
-**Integration total:** 2 passed, 0 failed.
+**Integration total:** 3 passed, 0 failed across the baseline and populated-data runs.
 
 ### Data-arrival report
 
 | Boundary required by the assignment | Status | Data unchanged? |
 |---|---|---|
-| Frontend app → backend API | PASS | The HTTP status and empty-array response were received and rendered without transformation errors. No sample records existed, so field-by-field record comparison was not possible. |
-| Backend API → database | NOT VERIFIED by this frontend suite | The frontend test does not inspect the database directly. This requires backend integration tests with database assertions. |
-| Backend API → Cloudinary | NOT VERIFIED by this frontend suite | The tested endpoint returned an empty sample list and did not retrieve a Cloudinary-backed image. This requires a seeded backend test that verifies image data. |
+| Frontend app → backend API | PASS | The populated sample and both replicates were returned by the real API and matched the expected IDs, counts, statuses, weights, grain boxes, and image metadata. |
+| Backend API → database | PASS with backend-seeded evidence | The backend supplied two persisted replicates for `2026WS-IND-001-S01`; the frontend received both records unchanged. Direct database assertions remain owned by backend tests. |
+| Backend API → Cloudinary | PASS with seeded image-metadata evidence | Both persisted `imagePublicId` and `imageSecureUrl` values arrived unchanged. The frontend did not upload or independently inspect Cloudinary objects. |
+
+**Populated-data evidence:** The sample contained two replicates. The test verified
+`replicateCount: 2`, `goodCount: 1`, the sample status and averages, both replicate
+labels, weights, percentages, grades, qualities, confidence values, grain-box
+coordinates, `imagePublicId`, and `imageSecureUrl`.
 
 **Bugs found:** An earlier backend configuration returned HTTP 500 for an empty
-database. The backend was corrected to return HTTP 200 with an empty list. The final
-frontend integration run passed.
+database. The backend was corrected to return HTTP 200 with an empty list. The
+populated-data integration test passed after the backend database was seeded.
 
-**Could not run:** No frontend integration test could verify API-to-database or
-API-to-Cloudinary fidelity because the local database contained zero records and those
-internal boundaries are outside the frontend repository.
+**Could not run:** Direct database row assertions and direct Cloudinary object
+verification were not run in the frontend repository; those remain backend-owned
+checks. The frontend verified the persisted values exposed by the API.
 
 ## System tests
 
