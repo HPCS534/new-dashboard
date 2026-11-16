@@ -49,6 +49,52 @@ React and TypeScript dashboard for reviewing grain-record submissions and AI-gen
 
    Open the URL printed by Vite, usually `http://localhost:5173`.
 
+## Testing the frontend
+
+The frontend tests are separated by test level:
+
+- Unit tests: component and helper behavior in `tests/unit`.
+- Integration tests: authenticated frontend requests against the backend in `tests/integration`.
+- System tests: complete user flows such as navigation, filtering, and logout in `tests/system`.
+- Performance tests: browser timing tests and authenticated k6 API tests in `tests/performance`.
+
+Install the Playwright browser once:
+
+```bash
+npx playwright install chromium
+```
+
+For integration, system, and performance tests, start the backend first. The default
+test backend is `http://localhost:5153`. Provide test credentials and the Supabase
+values required by the authenticated tests. In PowerShell:
+
+```powershell
+$env:TEST_EMAIL="your-test-user@example.com"
+$env:TEST_PASSWORD="your-test-password"
+$env:VITE_BACKEND_URL="http://localhost:5153"
+$env:BACKEND_URL="http://localhost:5153"
+$env:SUPABASE_URL="https://your-project.supabase.co"
+$env:SUPABASE_PUBLISHABLE_KEY="your-supabase-publishable-key"
+```
+
+Run one test level when working on a specific area:
+
+```bash
+npm run test:unit
+npm run test:integration
+npm run test:system
+npm run test:performance:browser
+npm run test:performance:api
+```
+
+Run the complete frontend test suite with one command:
+
+```bash
+npm run test:all
+```
+
+Do not commit passwords, secret keys, access tokens, or other credentials.
+
 ## Available scripts
 
 | Command | Description |
