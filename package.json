@@ -12,7 +12,8 @@
     "test:integration": "playwright test tests/integration",
     "test:system": "playwright test tests/system",
     "test:performance:browser": "playwright test tests/performance",
-    "test:all": "npm run test:unit && npm run test:integration && npm run test:system"
+    "test:performance:api": "k6 run tests/performance/api.k6.js",
+    "test:all": "npm run test:unit && npm run test:integration && npm run test:system && npm run test:performance:browser && npm run test:performance:api"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",

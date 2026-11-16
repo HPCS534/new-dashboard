@@ -61,7 +61,11 @@ React and TypeScript dashboard for reviewing grain-record submissions and AI-gen
 | `npm run test:integration` | Run browser/API integration tests |
 | `npm run test:system` | Run system tests |
 | `npm run test:performance:browser` | Run browser performance tests |
-| `npm run test:all` | Run the unit, integration, and system suites |
+| `npm run test:performance:api` | Run k6 API performance tests |
+| `npm run test:all` | Run unit, integration, system, browser performance, and API performance suites |
+
+`npm run test:all` requires the local backend, valid `TEST_EMAIL` and `TEST_PASSWORD`
+credentials, the frontend Supabase variables, and k6 on `PATH`.
 
 Run the build and linter before opening a pull request:
 
