@@ -97,10 +97,19 @@ function findSiblingSample(sample: SampleRecord, samples: SampleRecord[]): Sampl
     return samples.find((other) => sampleKey(other) !== sampleKey(sample) && other.season === sample.season && other.indexNumber === sample.indexNumber) ?? null;
 }
 
-function patchReplicate(samples: SampleRecord[] = [], id: string, patch: Partial<Replicate>): SampleRecord[] {
-    return samples.map((sample) => sample.replicates.some((record) => record.id === id)
-        ? {...sample, replicates: sample.replicates.map((record) => record.id === id ? {...record, ...patch} : record)}
-        : sample);
+export function patchReplicate(samples: SampleRecord[] = [], id: string, patch: Partial<Replicate>): SampleRecord[] {
+    return samples.map((sample) => {
+        if (!sample.replicates.some((record) => record.id === id)) return sample;
+
+        const replicates = sample.replicates.map((record) => record.id === id ? {...record, ...patch} : record);
+        const acceptedCount = replicates.filter((record) => record.reviewStatus === "accepted").length;
+
+        return {
+            ...sample,
+            replicates,
+            status: acceptedCount >= 2 ? "accepted" : "review",
+        };
+    });
 }
 
 const ZOOM_LEVELS = [1, 1.5, 2, 3, 4, 6];

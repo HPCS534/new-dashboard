@@ -61,4 +61,28 @@ test.describe("dashboard system flows", () => {
         const exportedFile = await download;
         expect(exportedFile.suggestedFilename()).toMatch(/^granular-records-\d{8}\.csv$/);
     });
+
+    test("keeps deployed replicate and sample review states consistent", async ({page}) => {
+        await signIn(page);
+
+        const row = page.locator("table tbody tr").filter({hasText: "Test1234"});
+        await expect(row).toBeVisible();
+        await expect(row).toContainText("Review");
+
+        await page.getByRole("navigation", {name: "Dashboard views"})
+            .getByRole("button", {name: "Kanban View"})
+            .click();
+
+        const replicateOne = page.locator(".kanban-card:visible").filter({hasText: "Test1234-01"});
+        const replicateTwo = page.locator(".kanban-card:visible").filter({hasText: "ASDF1234-02"});
+        await expect(replicateOne).toBeVisible();
+        await expect(replicateTwo).toBeVisible();
+
+        await page.getByRole("navigation", {name: "Dashboard views"})
+            .getByRole("button", {name: "Row view"})
+            .click();
+
+        await expect(row).toBeVisible();
+        await expect(row).toContainText("Review");
+    });
 });
